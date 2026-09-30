@@ -16,7 +16,7 @@ export class DshBrowserAdapter extends LlmAdapter{
  }
  async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
   if(signal?.aborted)throw signal.reason??new Error('请求已取消')
-  const p=provider==='deepseek-web'?'deepseek':provider==='chatgpt-web'?'chatgpt':null
+  const p=provider==='deepseek-web'?'deepseek':provider==='chatgpt-web'?'chatgpt':provider==='qwen-web'?'qwen':null
   if(!p)throw new LlmError(`未知 Web Provider：${provider}`,'MODEL_UNAVAILABLE')
   const accountId=accountIdOf(model)
   const account=this.accounts.list().find(a=>a.id===accountId&&a.provider===p)
