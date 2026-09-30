@@ -4,7 +4,7 @@ import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
 
 const DEFAULT_MODEL_ID='default'
 
-const TOOL_CALL_RE=/<dsh_tool_call>\\s*([\\s\\S]*?)\\s*<\\/dsh_tool_call>/g
+const TOOL_CALL_RE=/<dsh_tool_call>\s*([\s\S]*?)\s*<\/dsh_tool_call>/g
 
 function extractToolCalls(text:string){
  const calls:{id:ToolCallId;name:string;arguments:string}[]=[]
@@ -67,28 +67,22 @@ export class DshBrowserAdapter extends LlmAdapter{
    role:m.role,
    content:typeof m.content==='string'?m.content:m.content.filter(x=>x.type==='text').map(x=>x.text).join('\n')
   }))
+  const toolSchemas=options.tools??[]
   const browserAttachments=this.collectAttachments(options.messages)
   const sessionId=options.sessionId?String(options.sessionId):account.id
   const latest=messages.at(-1)
   const prompt=this.buildBrowserPrompt(latest?.role==='tool'?latest.content:'',latest?.role==='user'?latest.content:'',toolSchemas)
   let answer=''
-  let started=false
 
   try{
    for await(const delta of adapter.chat({accountId:account.id,model:options.model,sessionId,messages:[{role:'user',content:prompt}],attachments:browserAttachments,signal:options.signal})){
-    if(!delta)continue
-    if(!started){
-     started=true
-     yield {type:'block-start',index:0,blockType:'text'}
-    }
-    answer+=delta
-    yield {type:'text-delta',index:0,text:delta}
+    if(delta)answer+=delta
    }
    const toolCalls=extractToolCalls(answer)
    const visible=stripToolCalls(answer)
    if(toolCalls.length){
     if(visible){
-     if(!started){yield {type:'block-start',index:0,blockType:'text'}}
+     yield {type:'block-start',index:0,blockType:'text'}
      yield {type:'text-delta',index:0,text:visible}
      yield {type:'block-end',index:0,block:{type:'text',text:visible}}
     }
@@ -103,8 +97,8 @@ export class DshBrowserAdapter extends LlmAdapter{
     return
    }
    if(!visible)throw new LlmError('网页没有提取到模型回答','SERVICE_UNAVAILABLE')
-   if(!started)yield {type:'block-start',index:0,blockType:'text'}
-   if(visible!==answer)yield {type:'text-delta',index:0,text:visible}
+   yield {type:'block-start',index:0,blockType:'text'}
+   yield {type:'text-delta',index:0,text:visible}
    yield {type:'block-end',index:0,block:{type:'text',text:visible}}
    yield {type:'finish',reason:{kind:'stop'}}
   }catch(error){
@@ -119,12 +113,12 @@ export class DshBrowserAdapter extends LlmAdapter{
   const catalog=tools.map(tool=>JSON.stringify({name:tool.name,description:tool.description,parameters:tool.parameters})).join('\\n')
   const toolInstruction=[
    '你现在是 DSH 的 Web AI 模型。DSH 主机保留工具执行能力。',
-   '如果需要使用工具，只能输出一个或多个 <dsh_tool_call>...</dsh_tool_call>，标签内部必须是 JSON：{\\"name\\":工具名,\\"arguments\\":工具参数对象}。不要把工具调用写成普通解释文字。',
+   '如果需要使用工具，只能输出一个或多个 <dsh_tool_call>...</dsh_tool_call>，标签内部必须是 JSON：{"name":"工具名","arguments":工具参数对象}。不要把工具调用写成普通解释文字。',
    '如果不需要工具，直接正常回答。',
    '可用工具：',catalog
-  ].join('\\n')
-  if(toolResult)return `${toolInstruction}\\n\\n上一轮工具执行结果：\\n${toolResult}\\n\\n请继续完成任务。`
-  return `${toolInstruction}\\n\\n用户请求：\\n${userText}`
+  ].join('\n')
+  if(toolResult)return `${toolInstruction}\n\n上一轮工具执行结果：\n${toolResult}\n\n请继续完成任务。`
+  return `${toolInstruction}\n\n用户请求：\n${userText}`
  }
 
  private collectAttachments(messages:GenerateOptions['messages']):readonly {path:string;name?:string;kind:'image'|'file'}[]{
