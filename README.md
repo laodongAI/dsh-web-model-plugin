@@ -10,7 +10,7 @@
 - 登录状态由浏览器 Profile 持久化
 - DSH WebServer 管理接口
 - 不保存密码、Cookie、Token
-- 不调用 DeepSeek/ChatGPT 私有 HTTP API
+- 不调用 DeepSeek/ChatGPT/Qwen 私有 HTTP API
 
 ## 数据目录
 
