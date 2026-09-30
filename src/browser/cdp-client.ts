@@ -22,7 +22,7 @@ export async function connectTab(tab:CdpTab):Promise<CdpClient>{
  await call('Runtime.enable')
  return {
   async evaluate<T>(expression:string){const result=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.text||'页面脚本执行失败');return result.result?.result?.value as T},
-  async screenshot(){const result=await call('Page.captureScreenshot',{format:'jpeg',quality:72});return {data:result.data as string}}
+  async screenshot(){const result=await call('Page.captureScreenshot',{format:'jpeg',quality:72});return {data:result.data as string}},
   async setFileInputFiles(selector:string,files:readonly string[]){
    await call('DOM.enable')
    const root=await call('DOM.getDocument',{depth:1})
