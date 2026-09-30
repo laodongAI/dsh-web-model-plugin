@@ -29,6 +29,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   if(provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${provider}`,'MODEL_UNAVAILABLE')
   const accountId=accountIdOf(model)
   const account=accountId?this.accounts.list().find(a=>a.id===accountId):this.accounts.getDefaultAccount()
+  console.info('[dsh-account-models] resolveModel',JSON.stringify({provider,model,accountId:account?.id??null,accountStatus:account?.status??null}))
   if(!account)throw new LlmError('尚未配置默认 Web AI 浏览器账号，请先打开 Web AI 设置完成配置','MODEL_UNAVAILABLE')
   return {provider,id:model,name:account.displayName,inputModalities:['text','image']}
  }
