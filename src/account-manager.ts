@@ -5,12 +5,35 @@ import {AccountStore} from './account-store.js'
 import {BrowserManager} from './browser-manager.js'
 import type {AccountProvider,AccountSnapshot} from './types.js'
 import {DefaultBrowserProvider} from './providers/browser-provider.js'
+import {WebAiConfigStore} from './web-ai-config.js'
+
 export class AccountManager {
  readonly rootDir=join(homedir(),'.dsh','account-models')
  private store=new AccountStore(this.rootDir); private browser=new BrowserManager()
+ private configStore=new WebAiConfigStore(this.rootDir)
  private providers=new Map<string,DefaultBrowserProvider>()
- async init(){await this.store.load()}
+ async init(){await this.store.load();await this.configStore.load()}
  list():AccountSnapshot[]{return this.store.list().map(a=>({...a,browserRunning:this.browser.isRunning(a.id)}))}
+ getConfig(){return this.configStore.get()}
+ async setConfig(value:Pick<ReturnType<WebAiConfigStore['get']>,'defaultProvider'|'defaultAccountId'>){
+  if(value.defaultAccountId){
+   const account=this.store.get(value.defaultAccountId)
+   if(!account)throw new Error('默认 Web AI 账号不存在')
+   if(value.defaultProvider&&account.provider!==value.defaultProvider)throw new Error('默认 Provider 与账号不匹配')
+  }
+  if(value.defaultProvider&&!value.defaultAccountId){
+   const account=this.store.list().find(a=>a.provider===value.defaultProvider)
+   if(!account)throw new Error('该 Provider 尚未添加浏览器账号')
+   value={...value,defaultAccountId:account.id}
+  }
+  return this.configStore.set(value)
+ }
+ getDefaultAccount(){
+  const c=this.configStore.get()
+  if(!c.defaultAccountId)return undefined
+  const a=this.store.get(c.defaultAccountId)
+  return a?{...a,browserRunning:this.browser.isRunning(a.id)}:undefined
+ }
  async add(provider:AccountProvider,displayName?:string){const id=randomUUID();const now=new Date().toISOString();const profileDir=join(this.rootDir,provider,id,'profile');const port=await this.browser.open(id,provider,profileDir);const a={id,provider,displayName:displayName?.trim()||(provider==='chatgpt'?'ChatGPT':provider==='qwen'?'Qwen':provider==='tencent-yuanbao'?'腾讯混元 AI Studio':provider==='doubao'?'豆包':provider==='perplexity'?'Perplexity':provider==='copilot'?'Microsoft Copilot':provider==='huggingchat'?'HuggingChat':provider==='chatglm'?'智谱 AI':'Kimi'),profileDir,debugPort:port,status:'login_required' as const,createdAt:now,updatedAt:now};await this.store.upsert(a);this.providers.set(id,new DefaultBrowserProvider(provider,port));return this.snapshot(id)!}
  async open(id:string){const a=this.require(id);const port=await this.browser.open(id,a.provider,a.profileDir);await this.store.upsert({...a,debugPort:port,status:'unknown',updatedAt:new Date().toISOString()});this.providers.set(id,new DefaultBrowserProvider(a.provider,port));return this.snapshot(id)!}
  async checkReady(id:string){const a=this.require(id);if(!this.browser.isRunning(id))await this.open(id);const p=this.providers.get(id);if(!p)throw new Error('Provider 未初始化');const ready=await p.checkReady();await this.store.upsert({...a,status:ready?'ready':'login_required',updatedAt:new Date().toISOString(),lastError:undefined});return this.snapshot(id)!}
