@@ -1,11 +1,8 @@
 import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResolvedModelInfo,type StreamChunk} from '@deepseek-ai/dsh-llm'
 import type {AccountManager} from './account-manager.js'
 import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
-import type {AccountProvider} from './types.js'
 
-const PROVIDER_OF_ROUTE:Record<string,AccountProvider>={'web-ai':'deepseek'}
 const DEFAULT_MODEL_ID='web-ai:default'
-const idOf=(id:string)=>`web-ai:${id}`
 const accountIdOf=(id:string)=>id===DEFAULT_MODEL_ID?'':id.startsWith('web-ai:')?id.slice('web-ai:'.length):id
 
 export class DshBrowserAdapter extends LlmAdapter{
