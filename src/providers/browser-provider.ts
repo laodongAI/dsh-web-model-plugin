@@ -9,8 +9,7 @@ export class DefaultBrowserProvider implements BrowserProvider {
  private async page(sessionId:string,accountId:string){
   const tab=await this.conversations.findTab(this.port,sessionId,accountId)
   if(!tab)throw new Error('没有找到对应浏览器页面，请先打开账号窗口')
-  const cdp=await connectTab(tab);this.conversations.bind(sessionId,accountId,tab)
-  return {cdp,page:this.provider==='deepseek'?new DeepSeekPage(cdp):new ChatGptPage(cdp)}
+  const cdp=await connectTab(tab);const page=this.provider==='deepseek'?new DeepSeekPage(cdp):new ChatGptPage(cdp);const state=await page.getConversationState();const oldBinding=this.conversations.get(sessionId);if(oldBinding?.conversationId&&state.conversationId&&oldBinding.conversationId!==state.conversationId){this.conversations.markDesynced(sessionId);throw new Error('PAGE_CHANGED: 当前网页已切换到其他会话')}this.conversations.bind(sessionId,accountId,tab,state.conversationId);return {cdp,page}
  }
  async listModels():Promise<readonly BrowserProviderModel[]>{return this.provider==='deepseek'?[{id:'deepseek-web',name:'DeepSeek Web'}]:[{id:'chatgpt-web',name:'ChatGPT Web'}]}
  async checkLogin(){const tabs=await listTabs(this.port);const tab=tabs.find(x=>this.provider==='deepseek'?/deepseek\.com/.test(x.url):/chatgpt\.com/.test(x.url));if(!tab)return false;const cdp=await connectTab(tab);try{const page=this.provider==='deepseek'?new DeepSeekPage(cdp):new ChatGptPage(cdp);return await page.isLoggedIn()}finally{await cdp.close()}}
