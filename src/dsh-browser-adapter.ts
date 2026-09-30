@@ -59,7 +59,7 @@ export class DshBrowserAdapter extends LlmAdapter{
     const path=this.attachments.imageHostPath(block.attachment)
     if(path)result.push({path,name:block.attachment.name,kind:'image'})
    }else if(block.type==='text'){
-    const match=block.text.match(/\\[File\\s+"[^"]+"\\s+\\(\\d+\\s+bytes,\\s+sha256:[^)]+\\):\\s+verbatim\\s+read-only\\s+copy\\s+saved\\s+at\\s+"([^"]+)"\\./)
+    const match=block.text.match(/\[File\s+"[^"]+"\s+\(\d+\s+bytes,\s+sha256:[^)]+\):\s+verbatim\s+read-only\s+copy\s+saved\s+at\s+"([^"]+)"\./)
     if(match){try{result.push({path:JSON.parse('"'+match[1]+'"'),kind:'file'})}catch{}}
    }
   }
