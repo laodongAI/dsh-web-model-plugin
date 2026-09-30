@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import { AccountManager } from './account-manager.js'
 import { registerRoutes } from './http-routes.js'
 import { DshBrowserAdapter } from './dsh-browser-adapter.js'
