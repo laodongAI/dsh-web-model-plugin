@@ -1,6 +1,11 @@
 import {readFile,writeFile,mkdir} from 'node:fs/promises'
 
-const id='dsh-account-models'
+const packageJson=JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8'))
+const id=packageJson.name
+if(typeof id!=='string'||!id){
+  throw new Error('package.json.name is required for the client module id')
+}
+
 const source=await readFile(new URL('../src/client/index.js',import.meta.url),'utf8')
 
 await mkdir(new URL('../lib',import.meta.url),{recursive:true})
@@ -15,4 +20,4 @@ const output=[
 ].join('\n')
 
 await writeFile(new URL('../lib/client.js',import.meta.url),output,'utf8')
-console.log('[dsh-account-models] client bundle written')
+console.log(`[dsh-account-models] client bundle written: ${id}`)
