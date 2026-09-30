@@ -3,6 +3,7 @@ import {BrowserConversationManager} from '../browser/conversation-manager.js'
 import {PROVIDER_MAP} from '../provider-catalog.js'
 import type {AccountProvider} from '../types.js'
 import type {BrowserChatRequest,BrowserProvider,BrowserProviderModel,BrowserProviderErrorCode} from './provider.js'
+import type {WebPageTiming} from './web-page.js'
 import {DeepSeekPage} from './deepseek/deepseek-page.js'
 import {ChatGptPage} from './chatgpt/chatgpt-page.js'
 import {QwenPage} from './qwen/qwen-page.js'
@@ -15,12 +16,12 @@ import {KimiPage} from './kimi/kimi-page.js'
 import {ChatGlmPage} from './chatglm/chatglm-page.js'
 
 export class DefaultBrowserProvider implements BrowserProvider {
- constructor(public readonly provider:AccountProvider,private readonly port:number,private readonly conversations=new BrowserConversationManager()){}
+ constructor(public readonly provider:AccountProvider,private readonly port:number,private readonly conversations=new BrowserConversationManager(),private readonly timing:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){}
 
  private createPage(cdp:import('../browser/cdp-client.js').CdpClient){
   const pages={deepseek:DeepSeekPage,chatgpt:ChatGptPage,qwen:QwenPage,'tencent-yuanbao':TencentYuanbaoPage,doubao:DoubaoPage,perplexity:PerplexityPage,copilot:CopilotPage,huggingchat:HuggingChatPage,kimi:KimiPage,chatglm:ChatGlmPage} as const
   const C=pages[this.provider]
-  return new C(cdp)
+  return new C(cdp,this.timing)
  }
 
  private async page(sessionId:string,accountId:string){
