@@ -153,9 +153,23 @@ function WebAiSettingsPage({openLive}){
  )
 }
 
-const inject=['slots','sidebarRightTabs','sidebarRight']
+const inject=['slots']
 
-function apply(ctx){
+function registerSettings(ctx){
+ ctx.slots.inject('settings.section',()=>ctx.slots.register({
+  name:'settings.section',
+  id:'dsh-account-models',
+  order:30,
+  label:()=> 'Web AI',
+ },props=>createElement(WebAiSettingsPage,{
+  ...props,
+  openLive:(accountId)=>{
+   try{ctx.sidebarRight.openTab('web-ai-browser',{params:{accountId}})}catch(error){console.error('[dsh-account-models] open browser tab failed',error)}
+  }
+ })))
+}
+
+function registerSidebar(ctx){
  ctx.effect(()=>ctx.sidebarRightTabs.register({
   id:'dsh-account-models-browser',
   kind:'web-ai-browser',
@@ -167,16 +181,14 @@ function apply(ctx){
   {name:'sidebar.right.pane.tab',key:'dsh-account-models-browser'},
   BrowserLiveView,
  ))
-
- ctx.slots.inject('settings.section',()=>ctx.slots.register({
-  name:'settings.section',
-  id:'dsh-account-models',
-  order:30,
-  label:()=> 'Web AI',
- },props=>createElement(WebAiSettingsPage,{
-  ...props,
-  openLive:(accountId)=>ctx.sidebarRight.openTab('web-ai-browser',{params:{accountId}})
- })))
 }
 
+function apply(ctx){
+ console.info('[dsh-account-models] client apply')
+ registerSettings(ctx)
+ ctx.inject(['sidebarRightTabs','sidebarRight'],()=>{
+  try{registerSidebar(ctx);console.info('[dsh-account-models] sidebar services ready')}
+  catch(error){console.error('[dsh-account-models] sidebar registration failed',error)}
+ })
+}
 module.exports={inject,apply}
