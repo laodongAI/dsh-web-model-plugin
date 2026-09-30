@@ -1,8 +1,26 @@
-import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResolvedModelInfo,type StreamChunk} from '@deepseek-ai/dsh-llm'
+import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResolvedModelInfo,type StreamChunk,type ToolCallId} from '@deepseek-ai/dsh-llm'
+import {brandString} from '@deepseek-ai/dsh-brand'
 import type {AccountManager} from './account-manager.js'
 import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
 
 const DEFAULT_MODEL_ID='default'
+
+const TOOL_CALL_RE=/<dsh_tool_call>\\s*([\\s\\S]*?)\\s*<\\/dsh_tool_call>/g
+
+function extractToolCalls(text:string){
+ const calls:{id:ToolCallId;name:string;arguments:string}[]=[]
+ for(const match of text.matchAll(TOOL_CALL_RE)){
+  try{
+   const value=JSON.parse(match[1]) as {name?:unknown;arguments?:unknown;id?:unknown}
+   if(typeof value.name!=='string'||!value.name.trim())continue
+   const args=typeof value.arguments==='string'?value.arguments:JSON.stringify(value.arguments??{})
+   calls.push({id:brandString<ToolCallId>(typeof value.id==='string'&&value.id?value.id:`web-${calls.length+1}`),name:value.name.trim(),arguments:args})
+  }catch{}
+ }
+ return calls
+}
+
+function stripToolCalls(text:string){return text.replace(TOOL_CALL_RE,'').trim()}
 const accountIdOf=(id:string)=>id===DEFAULT_MODEL_ID?'':id.startsWith('web-ai:')?id.slice('web-ai:'.length):id
 
 export class DshBrowserAdapter extends LlmAdapter{
@@ -52,11 +70,13 @@ export class DshBrowserAdapter extends LlmAdapter{
   }))
   const browserAttachments=this.collectAttachments(options.messages)
   const sessionId=options.sessionId?String(options.sessionId):account.id
+  const latest=messages.at(-1)
+  const prompt=this.buildBrowserPrompt(latest?.role==='tool'?latest.content:'',latest?.role==='user'?latest.content:'',toolSchemas)
   let answer=''
   let started=false
 
   try{
-   for await(const delta of adapter.chat({accountId:account.id,model:options.model,sessionId,messages,attachments:browserAttachments,signal:options.signal})){
+   for await(const delta of adapter.chat({accountId:account.id,model:options.model,sessionId,messages:[{role:'user',content:prompt}],attachments:browserAttachments,signal:options.signal})){
     if(!delta)continue
     if(!started){
      started=true
@@ -65,14 +85,47 @@ export class DshBrowserAdapter extends LlmAdapter{
     answer+=delta
     yield {type:'text-delta',index:0,text:delta}
    }
-   if(!answer)throw new LlmError('网页没有提取到模型回答','SERVICE_UNAVAILABLE')
-   yield {type:'block-end',index:0,block:{type:'text',text:answer}}
+   const toolCalls=extractToolCalls(answer)
+   const visible=stripToolCalls(answer)
+   if(toolCalls.length){
+    if(visible){
+     if(!started){yield {type:'block-start',index:0,blockType:'text'}}
+     yield {type:'text-delta',index:0,text:visible}
+     yield {type:'block-end',index:0,block:{type:'text',text:visible}}
+    }
+    for(let i=0;i<toolCalls.length;i++){
+     const call=toolCalls[i]
+     const index=i+(visible?1:0)
+     yield {type:'block-start',index,blockType:'tool-call'}
+     yield {type:'tool-call-delta',index,id:call.id,name:call.name,argumentsDelta:call.arguments}
+     yield {type:'block-end',index,block:{type:'tool-call',id:call.id,name:call.name,arguments:call.arguments}}
+    }
+    yield {type:'finish',reason:{kind:'tool-calls'}}
+    return
+   }
+   if(!visible)throw new LlmError('网页没有提取到模型回答','SERVICE_UNAVAILABLE')
+   if(!started)yield {type:'block-start',index:0,blockType:'text'}
+   if(visible!==answer)yield {type:'text-delta',index:0,text:visible}
+   yield {type:'block-end',index:0,block:{type:'text',text:visible}}
    yield {type:'finish',reason:{kind:'stop'}}
   }catch(error){
    const code=adapter.classifyError(error)
    const mapped=code==='LOGIN_REQUIRED'||code==='SESSION_EXPIRED'?'AUTH':code==='RATE_LIMITED'?'RATE_LIMIT':code==='QUOTA_EXCEEDED'?'QUOTA_EXCEEDED':code==='SERVICE_UNAVAILABLE'?'UNAVAILABLE':'PROVIDER_ERROR'
    throw error instanceof LlmError?error:new LlmError(error instanceof Error?error.message:String(error),mapped,{cause:error})
   }
+ }
+
+ private buildBrowserPrompt(toolResult:string,userText:string,tools:NonNullable<GenerateOptions['tools']>):string{
+  if(tools.length===0)return userText
+  const catalog=tools.map(tool=>JSON.stringify({name:tool.name,description:tool.description,parameters:tool.parameters})).join('\\n')
+  const toolInstruction=[
+   '你现在是 DSH 的 Web AI 模型。DSH 主机保留工具执行能力。',
+   '如果需要使用工具，只能输出一个或多个 <dsh_tool_call>...</dsh_tool_call>，标签内部必须是 JSON：{\\"name\\":工具名,\\"arguments\\":工具参数对象}。不要把工具调用写成普通解释文字。',
+   '如果不需要工具，直接正常回答。',
+   '可用工具：',catalog
+  ].join('\\n')
+  if(toolResult)return `${toolInstruction}\\n\\n上一轮工具执行结果：\\n${toolResult}\\n\\n请继续完成任务。`
+  return `${toolInstruction}\\n\\n用户请求：\\n${userText}`
  }
 
  private collectAttachments(messages:GenerateOptions['messages']):readonly {path:string;name?:string;kind:'image'|'file'}[]{
