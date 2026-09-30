@@ -11,6 +11,37 @@ export abstract class WebPageAdapter{
  abstract detectError():Promise<{code:string;message:string}|null>
  abstract isGenerating():Promise<boolean>
  abstract expectedHost():string
+
+ async uploadFiles(files:readonly string[]):Promise<void>{
+  if(files.length===0)return
+  try{await this.cdp.setFileInputFiles('input[type="file"]',files)}
+  catch(firstError){
+   await this.clickAttachmentControl()
+   const deadline=Date.now()+5000
+   let lastError:unknown=firstError
+   while(Date.now()<deadline){
+    try{await this.cdp.setFileInputFiles('input[type="file"]',files);lastError=undefined;break}
+    catch(error){lastError=error;await sleep(250)}
+   }
+   if(lastError)throw new Error('PAGE_CHANGED: 未能打开网页文件上传控件: '+String(lastError))
+  }
+  await this.waitForUpload(files)
+ }
+
+ protected async clickAttachmentControl(){
+  await this.cdp.evaluate<void>(`(()=>{const xs=[...document.querySelectorAll('button,[role="button"],label')];const b=xs.find(x=>{const t=[x.textContent||'',x.getAttribute('aria-label')||'',x.getAttribute('title')||''].join(' ');return /附件|上传|文件|attach|upload|file/i.test(t)&&!/发送|send|submit/i.test(t)});if(!b)throw new Error('PAGE_CHANGED: 未找到网页附件按钮');b.click()})()`)
+ }
+
+ protected async waitForUpload(files:readonly string[]){
+  const names=files.map(x=>x.split(/[\\/]/).pop()||x)
+  const deadline=Date.now()+15000
+  while(Date.now()<deadline){
+   const state=await this.cdp.evaluate<{count:number;text:string}>(`(()=>({count:document.querySelector('input[type="file"]')?.files?.length||0,text:document.body?.innerText||''}))()`)
+   if(state.count>=files.length||names.every(n=>state.text.includes(n)))return
+   await sleep(300)
+  }
+  throw new Error('SERVICE_UNAVAILABLE: 网页文件上传未在限定时间内完成')
+ }
  async health():Promise<WebPageHealthResult>{
   const state=await this.getConversationState()
   if(!state.url.includes(this.expectedHost()))return {status:'page_changed',message:'当前浏览器页面不是目标模型页面',state}
@@ -32,7 +63,7 @@ export abstract class WebPageAdapter{
    else if(current!==previous&&current.length>previous.length){previous=current;idle=0;yield current}
    else if(previous)idle++
    if(previous&&!await this.isGenerating()&&idle>=2)return
-   await new Promise(r=>setTimeout(r,400))
+   await sleep(400)
   }
   throw new Error('SERVICE_UNAVAILABLE: 网页模型响应超时')
  }
