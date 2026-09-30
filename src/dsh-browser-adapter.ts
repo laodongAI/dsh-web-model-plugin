@@ -3,21 +3,32 @@ import type {AccountManager} from './account-manager.js'
 import type {AccountProvider} from './types.js'
 import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
 const ROUTES:Record<AccountProvider,string>={deepseek:'deepseek-web',chatgpt:'chatgpt-web',qwen:'qwen-web','tencent-yuanbao':'tencent-yuanbao-web',doubao:'doubao-web',perplexity:'perplexity-web',copilot:'copilot-web',huggingchat:'huggingchat-web',kimi:'kimi-web',chatglm:'chatglm-web'}
+const PROVIDER_OF_ROUTE:Record<string,AccountProvider>={'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi','chatglm-web':'chatglm'}
 const prefix=(p:AccountProvider)=>ROUTES[p]
 const idOf=(p:AccountProvider,id:string)=>`${prefix(p)}:${id}`
 const accountIdOf=(id:string)=>id.includes(':')?id.slice(id.indexOf(':')+1):id
 
 export class DshBrowserAdapter extends LlmAdapter{
  constructor(private readonly accounts:AccountManager,private readonly attachments:AttachmentStore){super()}
- providerInfo(provider:string){const names:Record<string,string>={'deepseek-web':'DeepSeek Web','chatgpt-web':'ChatGPT Web','qwen-web':'Qwen Web','tencent-yuanbao-web':'腾讯混元 AI Studio','doubao-web':'豆包 Web','perplexity-web':'Perplexity Web','copilot-web':'Microsoft Copilot Web','huggingchat-web':'HuggingChat Web','kimi-web':'Kimi Web','chatglm-web':'智谱 AI Web'};return {id:provider,name:names[provider]??provider}}
+ providerInfo(provider:string){const names:Record<string,string>={'web-ai':'Web AI（浏览器）','deepseek-web':'DeepSeek Web','chatgpt-web':'ChatGPT Web','qwen-web':'Qwen Web','tencent-yuanbao-web':'腾讯混元 AI Studio','doubao-web':'豆包 Web','perplexity-web':'Perplexity Web','copilot-web':'Microsoft Copilot Web','huggingchat-web':'HuggingChat Web','kimi-web':'Kimi Web','chatglm-web':'智谱 AI Web'};return {id:provider,name:names[provider]??provider}}
  async listModels(provider:string):Promise<readonly LlmModelInfo[]>{
-  const p=({ 'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi','chatglm-web':'chatglm'} as Record<string,AccountProvider|undefined>)[provider]??null
+  if(provider==='web-ai'){
+   const a=this.accounts.getDefaultAccount()
+   return a?[{provider:'web-ai',id:`web-ai:${a.id}`,name:a.displayName,description:`${a.provider} · ${a.status==='ready'?'已登录':a.status==='login_required'?'需要登录':'浏览器会话状态未知'}`}] : []
+  }
+  const p=PROVIDER_OF_ROUTE[provider]
   if(!p)return []
   return this.accounts.list().filter(a=>a.provider===p).map(a=>({provider,id:idOf(p,a.id),name:a.displayName,description:a.status==='ready'?'浏览器会话已登录':a.status==='login_required'?'需要登录':'浏览器会话状态未知'}))
  }
  async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
   if(signal?.aborted)throw signal.reason??new Error('请求已取消')
-  const p=({'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi','chatglm-web':'chatglm'} as Record<string,AccountProvider|undefined>)[provider]??null
+  if(provider==='web-ai'){
+   const accountId=accountIdOf(model)
+   const account=this.accounts.list().find(a=>a.id===accountId)
+   if(!account)throw new LlmError(`默认 Web AI 模型账号不存在：${model}`,'MODEL_UNAVAILABLE')
+   return {provider:'web-ai',id:`web-ai:${account.id}`,name:account.displayName,inputModalities:['text','image']}
+  }
+  const p=PROVIDER_OF_ROUTE[provider]
   if(!p)throw new LlmError(`未知 Web Provider：${provider}`,'MODEL_UNAVAILABLE')
   const accountId=accountIdOf(model)
   const account=this.accounts.list().find(a=>a.id===accountId&&a.provider===p)
@@ -25,22 +36,19 @@ export class DshBrowserAdapter extends LlmAdapter{
   return {provider,id:idOf(p,account.id),name:account.displayName,inputModalities:['text','image']}
  }
  async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
-  const p=({ 'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi','chatglm-web':'chatglm'} as Record<string,AccountProvider|undefined>)[options.provider]??null
-  if(!p)throw new LlmError('未找到 Web Provider','MODEL_UNAVAILABLE')
+  const targetProvider=options.provider==='web-ai'?undefined:PROVIDER_OF_ROUTE[options.provider]
   const accountId=accountIdOf(options.model)
-  const account=this.accounts.list().find(a=>a.id===accountId&&a.provider===p)
-  if(!account)throw new LlmError('未找到所选 Web 模型账号','MODEL_UNAVAILABLE')
+  const account=this.accounts.list().find(a=>a.id===accountId&&(!targetProvider||a.provider===targetProvider))
+  if(!account)throw new LlmError('未找到所选 Web AI 模型账号','MODEL_UNAVAILABLE')
   const adapter=this.accounts.getProvider(account.id)
   if(!adapter)throw new LlmError('账号浏览器尚未启动，请先打开账号','LOGIN_REQUIRED')
-  const messages=options.messages.map(m=>({role:m.role,content:typeof m.content==='string'?m.content:m.content.filter(x=>x.type==='text').map(x=>x.text).join('\n')}))
+  const messages=options.messages.map(m=>({role:m.role,content:typeof m.content==='string'?m.content:m.content.filter(x=>x.type==='text').map(x=>x.text).join('\\n')}))
   const browserAttachments=this.collectAttachments(options.messages)
   const sessionId=options.sessionId?String(options.sessionId):account.id
   let answer=''
   try{
    yield {type:'block-start',index:0,blockType:'text'}
-   for await(const delta of adapter.chat({accountId:account.id,model:options.model,sessionId,messages,attachments:browserAttachments,signal:options.signal})){
-    if(delta){answer+=delta;yield {type:'text-delta',index:0,text:delta}}
-   }
+   for await(const delta of adapter.chat({accountId:account.id,model:options.model,sessionId,messages,attachments:browserAttachments,signal:options.signal})){if(delta){answer+=delta;yield {type:'text-delta',index:0,text:delta}}}
    if(!answer)throw new LlmError('网页没有提取到模型回答','SERVICE_UNAVAILABLE')
    yield {type:'block-end',index:0,block:{type:'text',text:answer}}
    yield {type:'finish',reason:{kind:'stop'}}
@@ -55,15 +63,9 @@ export class DshBrowserAdapter extends LlmAdapter{
   if(!latest||typeof latest.content==='string')return []
   const result:{path:string;name?:string;kind:'image'|'file'}[]=[]
   for(const block of latest.content){
-   if(block.type==='image'){
-    const path=this.attachments.imageHostPath(block.attachment)
-    if(path)result.push({path,name:block.attachment.name,kind:'image'})
-   }else if(block.type==='text'){
-    const match=block.text.match(/\[File\s+"[^"]+"\s+\(\d+\s+bytes,\s+sha256:[^)]+\):\s+verbatim\s+read-only\s+copy\s+saved\s+at\s+"([^"]+)"\./)
-    if(match){try{result.push({path:JSON.parse('"'+match[1]+'"'),kind:'file'})}catch{}}
-   }
+   if(block.type==='image'){const path=this.attachments.imageHostPath(block.attachment);if(path)result.push({path,name:block.attachment.name,kind:'image'})}
+   else if(block.type==='text'){const match=block.text.match(/\[File\s+"[^"]+"\s+\(\d+\s+bytes,\s+sha256:[^)]+\):\s+verbatim\s+read-only\s+copy\s+saved\s+at\s+"([^"]+)"\./);if(match){try{result.push({path:JSON.parse('"'+match[1]+'"'),kind:'file'})}catch{}}}
   }
-  const seen=new Set<string>()
-  return result.filter(x=>seen.has(x.path)?false:(seen.add(x.path),true))
+  const seen=new Set<string>();return result.filter(x=>seen.has(x.path)?false:(seen.add(x.path),true))
  }
 }
