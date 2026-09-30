@@ -4,7 +4,7 @@
 
 ## 当前实现
 
-- DeepSeek / ChatGPT 账号记录
+- DeepSeek / ChatGPT / Qwen 账号记录
 - 每个账号独立 Chromium Profile
 - 可见 Chrome/Chromium 登录窗口
 - 登录状态由浏览器 Profile 持久化
@@ -19,7 +19,7 @@
 ```
 accounts.json
 deepseek/<account-id>/profile/
-chatgpt/<account-id>/profile/
+chatgpt/<account-id>/profile/\nqwen/<account-id>/profile/
 ```
 
 ## Chrome
@@ -36,7 +36,7 @@ DSH_CHROME_PATH=C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe
 GET  /api/dsh-account-models/accounts
 POST /api/dsh-account-models/accounts/add
 POST /api/dsh-account-models/accounts/:id/open
-POST /api/dsh-account-models/accounts/:id/close
+POST /api/dsh-account-models/accounts/:id/check\nPOST /api/dsh-account-models/accounts/:id/close
 DELETE /api/dsh-account-models/accounts/:id/account
 ```
 
@@ -130,7 +130,7 @@ macOS/Linux：
 重新打开 Desktop 后：
 
 1. 确认 dsh-account-models 已加载。
-2. 添加 DeepSeek 或 ChatGPT 账号。
+2. 添加 DeepSeek、ChatGPT 或 Qwen 账号。
 3. 检查可见 Chromium 是否启动。
 4. 手工完成网页登录。
 5. 检查账号状态变为 ready。
@@ -171,7 +171,7 @@ macOS/Linux：
 
 账号登录完全通过用户可见的 Chromium 页面完成。出现 CAPTCHA、二次验证或其他人工验证时，插件不会尝试绕过，而是等待用户完成验证。
 
-插件不调用 DeepSeek / ChatGPT 私有 HTTP API；模型交互通过用户可见浏览器页面的 DOM/CDP 完成。
+插件不调用 DeepSeek / ChatGPT / Qwen 私有 HTTP API；模型交互通过用户可见浏览器页面的 DOM/CDP 完成。
 
 ## CI 构建
 
