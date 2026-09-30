@@ -98,6 +98,9 @@ export class AccountManager {
   await this.browser.close(id)
   this.providers.delete(id)
   await this.store.remove(id)
+  if(this.configStore.get().defaultAccountId===id){
+   await this.configStore.set({})
+  }
  }
 
  getProvider(id:string){this.require(id);return this.providers.get(id)}
