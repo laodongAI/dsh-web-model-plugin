@@ -40,6 +40,7 @@ export class AccountManager {
  async close(id:string){const a=this.require(id);await this.browser.close(id);this.providers.delete(id);await this.store.upsert({...a,status:'browser_closed',updatedAt:new Date().toISOString()});return this.snapshot(id)!}
  async remove(id:string){this.require(id);await this.browser.close(id);this.providers.delete(id);await this.store.remove(id)}
  getProvider(id:string){this.require(id);return this.providers.get(id)}
+ async screenshot(id:string){const a=this.require(id);if(!this.browser.isRunning(id))await this.open(id);const p=this.providers.get(id);if(!p)throw new Error('Provider 未初始化');return p.screenshot()}
  snapshot(id:string){const a=this.store.get(id);return a?{...a,browserRunning:this.browser.isRunning(id)}:undefined}
  async dispose(){await this.browser.closeAll()}
  private require(id:string){const a=this.store.get(id);if(!a)throw new Error('账号不存在: '+id);return a}
