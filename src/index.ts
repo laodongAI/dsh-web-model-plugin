@@ -53,7 +53,7 @@ export async function apply(ctx:Context,config:Config){
   syncLog('CONFIG_RECEIVED')
   await bootLog(`config: ${JSON.stringify({chromePath:config.chromePath??null,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs,streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})}`)
   syncLog('ACCOUNT_MANAGER_CREATING')
-  const accounts=new AccountManager({chromePath:config.chromePath,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs},{streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.uploadTimeoutMs})
+  const accounts=new AccountManager({chromePath:config.chromePath,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs},{streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})
   syncLog('ACCOUNT_MANAGER_CREATED')
   await bootLog('apply: AccountManager created')
   syncLog('ACCOUNT_INIT_START')
