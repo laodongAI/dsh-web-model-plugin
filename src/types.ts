@@ -1,4 +1,4 @@
-export type AccountProvider = 'deepseek' | 'chatgpt'
+export type AccountProvider = 'deepseek' | 'chatgpt' | 'qwen'
 export type AccountStatus = 'unknown' | 'login_required' | 'ready' | 'browser_closed' | 'error'
 export interface AccountRecord { id:string; provider:AccountProvider; displayName:string; profileDir:string; debugPort:number; status:AccountStatus; createdAt:string; updatedAt:string; lastError?:string }
 export interface AccountSnapshot extends AccountRecord { browserRunning:boolean }
