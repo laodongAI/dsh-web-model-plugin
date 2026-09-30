@@ -30,7 +30,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   const accountId=accountIdOf(model)
   const account=accountId?this.accounts.list().find(a=>a.id===accountId):this.accounts.getDefaultAccount()
   if(!account)throw new LlmError('尚未配置默认 Web AI 浏览器账号，请先打开 Web AI 设置完成配置','MODEL_UNAVAILABLE')
-  return {provider,id:DEFAULT_MODEL_ID,name:account.displayName,inputModalities:['text','image']}
+  return {provider,id:model,name:account.displayName,inputModalities:['text','image']}
  }
 
  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
