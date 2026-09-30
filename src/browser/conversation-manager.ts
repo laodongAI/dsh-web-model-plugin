@@ -7,6 +7,7 @@ export interface BrowserConversation{
 }
 export class BrowserConversationManager{
  private readonly map=new Map<string,BrowserConversation>()
+ private readonly uploaded=new Map<string,Set<string>>()
  bind(sessionId:string,accountId:string,tab:CdpTab,conversationId?:string){
   const now=new Date().toISOString(),old=this.map.get(sessionId)
   const value={sessionId,accountId,tabId:tab.id,url:tab.url,conversationId,createdAt:old?.createdAt??now,lastUsedAt:now,status:'bound' as const}
@@ -15,8 +16,10 @@ export class BrowserConversationManager{
  get(sessionId:string){return this.map.get(sessionId)}
  findByAccount(accountId:string){for(const v of this.map.values())if(v.accountId===accountId)return v}
  markDesynced(sessionId:string){const v=this.map.get(sessionId);if(v)v.status='desynced'}
- unbind(sessionId:string){this.map.delete(sessionId)}
- clearAccount(accountId:string){for(const [id,v] of this.map)if(v.accountId===accountId)this.map.delete(id)}
+ unbind(sessionId:string){this.map.delete(sessionId);this.uploaded.delete(sessionId)}
+ clearAccount(accountId:string){for(const [id,v] of this.map)if(v.accountId===accountId){this.map.delete(id);this.uploaded.delete(id)}}
+ unuploaded(sessionId:string,paths:readonly string[]){const seen=this.uploaded.get(sessionId)??new Set<string>();return paths.filter(p=>!seen.has(p))}
+ markUploaded(sessionId:string,paths:readonly string[]){const seen=this.uploaded.get(sessionId)??new Set<string>();for(const p of paths)seen.add(p);this.uploaded.set(sessionId,seen)}
  async findTab(port:number,sessionId:string,accountId:string){
   const binding=this.map.get(sessionId),tabs=await listTabs(port)
   if(binding?.accountId===accountId){
