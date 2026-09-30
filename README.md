@@ -192,3 +192,17 @@ CI 使用 Node 22 执行：
 ## License
 
 MIT
+
+
+## 当前 Web Provider
+
+除 DeepSeek、ChatGPT、Qwen 外，当前插件已扩展以下浏览器账号模型：
+
+- 腾讯混元 AI Studio：`tencent-yuanbao-web`（入口为用户指定的 `aistudio.tencent.com`）
+- 豆包：`doubao-web`
+- Perplexity：`perplexity-web`
+- Microsoft Copilot：`copilot-web`
+- HuggingChat：`huggingchat-web`
+- Kimi：`kimi-web`
+
+以上均遵循浏览器会话模式：用户在持久化 Chromium Profile 中自行登录，插件通过 CDP/DOM 操作可见网页，不调用这些产品的私有 HTTP API。当前统一支持 DSH 文本消息和附件上传桥；每个平台的 DOM 选择器仍需要在实际登录页面逐一验收。
