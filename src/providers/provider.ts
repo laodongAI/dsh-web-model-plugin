@@ -9,7 +9,7 @@ export interface BrowserChatRequest{
 export interface BrowserProvider{
  readonly provider:AccountProvider
  listModels():Promise<readonly BrowserProviderModel[]>
- checkLogin():Promise<boolean>
+ checkReady():Promise<boolean>
  chat(request:BrowserChatRequest):AsyncIterable<string>
  classifyError(error:unknown):BrowserProviderErrorCode
 }
