@@ -1,4 +1,4 @@
-import type {IncomingMessage,ServerResponse} from 'node:http'
+import {IncomingMessage,ServerResponse} from 'node:http'
 import type {AccountManager} from './account-manager.js'
 import type {AccountProvider} from './types.js'
 
@@ -59,8 +59,7 @@ export function registerRoutes(m:AccountManager,register:(r:Route)=>()=>void){
   }catch(error){return json(s,{error:error instanceof Error?error.message:String(error)},400)}
  }})
 
- const disposers=routes.map(register)
- return()=>disposers.forEach(dispose=>dispose())
+ return()=>routes.map(register).forEach(dispose=>dispose())
 }
 
 async function body(q:IncomingMessage){
