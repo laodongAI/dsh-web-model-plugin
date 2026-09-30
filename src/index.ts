@@ -62,7 +62,7 @@ export async function apply(ctx:Context,config:Config){
  await bootLog('apply: llm adapter registered')
  await bootLog('llm.registerAdapter: completed')
  await bootLog('webServer routes: starting')
- const disposeRoutes=registerRoutes(accounts,r=>{ await bootLog(`webServer.register: ${r.kind} ${r.path}`); return ctx.webServer.register(r) })
+ const disposeRoutes=registerRoutes(accounts,r=>{ void bootLog(`webServer.register: ${r.kind} ${r.path}`); return ctx.webServer.register(r) })
  await bootLog('apply: routes registered')
 
  ctx.effect(()=>{
