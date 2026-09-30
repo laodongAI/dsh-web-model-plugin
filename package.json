@@ -1,9 +1,42 @@
 {
-  "name":"dsh-account-models","version":"0.1.0","description":"DSH 0.2.0-rc.2 browser-session accounts for DeepSeek and ChatGPT","type":"module",
-  "main":"lib/index.js","types":"lib/types/index.d.ts","exports":{".":{"types":"./lib/types/index.d.ts","default":"./lib/index.js"}},
-  "files":["lib","README.md"],"engines":{"node":">=22"},
-  "peerDependencies":{"@deepseek-ai/cordis":"0.2.0-rc.2","@deepseek-ai/dsh-host-webserver":"0.2.0-rc.2"},
-  "devDependencies":{"@deepseek-ai/cordis":"0.2.0-rc.2","@deepseek-ai/dsh-host-webserver":"0.2.0-rc.2","typescript":"^5.8.0"},
-  "scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc -p tsconfig.json --noEmit"},
-  "dsh":{"host":{"platform":"web"}},"license":"MIT"
+  "name": "dsh-account-models",
+  "version": "0.1.0",
+  "description": "DSH 0.2.0-rc.2 browser-session accounts for DeepSeek and ChatGPT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
+    "typescript": "^5.8.0",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dsh": {
+    "host": {
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
 }
