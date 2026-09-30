@@ -24,7 +24,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   return {provider,id:idOf(p,account.id),name:account.displayName,inputModalities:['text']}
  }
  async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
-  const p=options.provider==='deepseek-web'?'deepseek':options.provider==='chatgpt-web'?'chatgpt':null
+  const p=options.provider==='deepseek-web'?'deepseek':options.provider==='chatgpt-web'?'chatgpt':options.provider==='qwen-web'?'qwen':null
   if(!p)throw new LlmError('未找到 Web Provider','MODEL_UNAVAILABLE')
   const accountId=accountIdOf(options.model)
   const account=this.accounts.list().find(a=>a.id===accountId&&a.provider===p)
