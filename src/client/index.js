@@ -114,8 +114,6 @@ function WebAiSettingsPage({openLive}){
 
 const inject=['slots']
 
-const inject=['slots']
-
 function apply(ctx){
  console.info('[dsh-account-models] client apply')
  ctx.slots.inject('settings.section',()=>ctx.slots.register({
