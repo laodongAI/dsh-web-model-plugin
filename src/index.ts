@@ -35,10 +35,7 @@ export function apply(ctx:Context,config:Config){
  void accounts.init().then(()=>{
   if(disposed){void accounts.dispose();return}
   const adapter=new DshBrowserAdapter(accounts,ctx.attachments)
-  const disposeAdapter=ctx.llm.registerAdapter([
-   'web-ai','deepseek-web','chatgpt-web','qwen-web','tencent-yuanbao-web',
-   'doubao-web','perplexity-web','copilot-web','huggingchat-web','kimi-web','chatglm-web'
-  ],adapter)
+  const disposeAdapter=ctx.llm.registerAdapter(['web-ai'],adapter)
   const disposeRoutes=registerRoutes(accounts,r=>ctx.webServer.register(r))
   ctx.effect(()=>{
    return async()=>{
