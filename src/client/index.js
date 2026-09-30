@@ -90,6 +90,17 @@ function WebAiSettingsPage({openLive}){
   finally{setBusy('')}
  }
 
+ async function removeAccount(id){
+ setBusy(id);setMessage('')
+ try{
+  await api('/api/dsh-account-models/accounts/remove',{method:'POST',body:JSON.stringify({accountId:id})})
+  if(accountId===id)setAccountId('')
+  await refresh()
+  setMessage('浏览器账号已删除')
+ }catch(e){setMessage(e instanceof Error?e.message:String(e))}
+ finally{setBusy('')}
+}
+
  async function check(id){
   setBusy(id);setMessage('')
   try{
@@ -127,7 +138,8 @@ function WebAiSettingsPage({openLive}){
      createElement('input',{type:'radio',name:'web-ai-account',checked:accountId===a.id,onChange:()=>setAccountId(a.id)}),
      createElement('span',null,a.displayName),
      createElement('span',{style:{opacity:.65}},a.status==='ready'?'● 已就绪':a.status==='login_required'?'○ 需要登录':'○ '+a.status),
-     createElement('button',{type:'button',disabled:busy===a.id,onClick:()=>check(a.id),style:{marginLeft:'auto'}},busy===a.id?'检查中…':'检查登录状态')
+     createElement('button',{type:'button',disabled:busy===a.id,onClick:()=>check(a.id),style:{marginLeft:'auto'}},busy===a.id?'检查中…':'检查登录状态'),
+     createElement('button',{type:'button',disabled:busy===a.id,onClick:()=>removeAccount(a.id)},'删除')
     )):createElement('div',{style:{opacity:.7}},'当前 Provider 尚未添加浏览器账号。'),
     createElement('button',{type:'button',disabled:busy==='add',onClick:addAccount,style:{marginTop:8}},busy==='add'?'正在启动浏览器…':'添加并打开浏览器')
    )
