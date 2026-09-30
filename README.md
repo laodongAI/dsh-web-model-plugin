@@ -30,10 +30,12 @@
 - Live View 当前显示真实 Chromium 会话的 CDP 截图，约每 1.5 秒刷新。
 
 ## Web AI 模型
-模型选择器使用稳定模型 ID：web-ai:default。
+模型选择器使用稳定模型 ID：default（兼容旧版 web-ai:default）。
 
 发送请求链路：
-DSH → web-ai → defaultAccountId → AccountProvider → 独立 Chromium Profile → Web AI 页面 → DOM/CDP → StreamChunk → DSH。
+DSH Agent Loop → web-ai → defaultAccountId → AccountProvider → 独立 Chromium Profile → Web AI 页面 → DOM/CDP → StreamChunk → DSH Agent Loop。
+
+0.2.0 开始，Adapter 保留 DSH 的 tools 上下文；Web AI 如果按约定输出 `<dsh_tool_call>...</dsh_tool_call>`，插件会转换为 DSH 原生 `tool-call` 分片，由 DSH Agent Loop 继续执行本地工具并把 Tool Result 带回下一轮 Web AI。
 
 因此切换 Provider 时不需要更换 DSH 模型类型。
 
@@ -74,13 +76,13 @@ pnpm typecheck
 pnpm build
 pnpm pack --pack-destination .\packed
 
-当前版本：dsh-account-models-0.1.2.tgz
+当前版本：dsh-account-models-0.2.0.tgz
 
 建议每次生成新的 tgz 后再安装，避免 DSH 插件管理器继续使用旧缓存包。
 
 ## DSH Desktop 安装
 完全退出 DSH Desktop 后执行：
-dsh.cmd plugin --profile desktop add .\packed\dsh-account-models-0.1.2.tgz
+dsh.cmd plugin --profile desktop add .\packed\dsh-account-models-0.2.0.tgz
 
 如之前安装过旧版本：
 dsh.cmd plugin --profile desktop remove dsh-account-models
@@ -94,8 +96,9 @@ dsh.cmd plugin --profile desktop remove dsh-account-models
 4. 手工完成网页登录并检查登录状态。
 5. 保存默认 Provider / Account。
 6. DSH 模型选择器出现一个统一的 Web AI（浏览器）。
-7. 普通 DSH 对话能够通过网页模型增量返回。
+7. 普通 DSH 对话能够通过网页模型增量返回，长 Thinking 不因 60 秒无首字超时提前失败。
 8. 同一 DSH Session 保持对应网页 Conversation。
+9. 当 DSH 提供 tools 时，Web AI 可以通过工具调用协议请求本地 Agent Tool，由 DSH 执行后继续下一轮模型推理。
 9. Stop 能停止网页生成。
 10. 手工切换网页 Conversation 后应返回 PAGE_CHANGED。
 11. Right Sidebar 的 Web AI 浏览器能够显示真实 Chromium 页面。
@@ -110,5 +113,5 @@ DSH 官方 ui-sidebar-browser 用于 Sidebar 中的 sandboxed HTTP(S) 页面；�
 ## 安全边界
 本插件不保存密码、不提取 Cookie/Token、不调用目标站点私有 API、不重放浏览器 HTTP 请求、不绕过 CAPTCHA 或二次验证。
 
-当前版本：0.1.2
+当前版本：0.2.0
 目标：DSH 0.2.0-rc.2
