@@ -1,5 +1,7 @@
 import type {CdpTab} from './cdp-client.js'
 import {listTabs} from './cdp-client.js'
+import type {AccountProvider} from '../types.js'
+import {PROVIDER_MAP} from '../provider-catalog.js'
 
 export type BrowserConversationStatus='bound'|'desynced'
 export interface BrowserConversation{
@@ -55,24 +57,13 @@ export class BrowserConversationManager{
   this.uploaded.set(sessionId,seen)
  }
 
- async findTab(port:number,sessionId:string,accountId:string){
+ async findTab(port:number,sessionId:string,accountId:string,provider:AccountProvider){
   const binding=this.map.get(sessionId),tabs=await listTabs(port)
   if(binding?.accountId===accountId){
    const current=tabs.find(t=>t.id===binding.tabId)
    if(current){binding.url=current.url;binding.lastUsedAt=new Date().toISOString();return current}
   }
-  const patterns={
-   deepseek:/^https:\/\/(?:chat\.)?deepseek\.com/i,
-   chatgpt:/^https:\/\/chatgpt\.com/i,
-   qwen:/^https:\/\/chat\.qwen\.ai/i,
-   'tencent-yuanbao':/^https:\/\/aistudio\.tencent\.com/i,
-   doubao:/^https:\/\/www\.doubao\.com/i,
-   perplexity:/^https:\/\/www\.perplexity\.ai/i,
-   copilot:/^https:\/\/copilot\.microsoft\.com/i,
-   huggingchat:/^https:\/\/huggingface\.co\/chat/i,
-   kimi:/^https:\/\/(?:www\.)?kimi\.(?:moonshot\.cn|com)/i,
-   chatglm:/^https:\/\/chatglm\.cn/i
-  }
-  return tabs.find(t=>patterns[accountId as never]?.test(t.url))??tabs.find(t=>/^https:\/\//i.test(t.url))??null
+  const pattern=PROVIDER_MAP[provider].hostPattern
+  return tabs.find(t=>pattern.test(t.url))??null
  }
 }
