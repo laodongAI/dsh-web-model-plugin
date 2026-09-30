@@ -1,7 +1,7 @@
 import {WebPageAdapter,type WebConversationState} from '../web-page.js'
 export class KimiPage extends WebPageAdapter{
  expectedHost(){return 'kimi.com'}
- async isLoggedIn(){return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector('textarea,[contenteditable="true"]'))()`)}
+ async canChat(){return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector('textarea,[contenteditable="true"]'))()`)}
  async getConversationState():Promise<WebConversationState>{return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/(?:chat|conversation|c)\\/([\\w-]+)/)||[])[1],ready:!!document.querySelector('textarea,[contenteditable="true"]'),changed:false}))()`)}
  async sendMessage(text:string){await this.cdp.evaluate<void>(`(()=>{const e=document.querySelector('textarea,[contenteditable="true"]');if(!e)throw new Error('PAGE_CHANGED: Kimi 输入框未找到');e.focus();if(e instanceof HTMLTextAreaElement){const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;s?.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}))}else{e.textContent=${JSON.stringify(text)};e.dispatchEvent(new InputEvent('input',{bubbles:true}))}const b=[...document.querySelectorAll('button')].find(x=>/发送|send|提交/i.test(x.textContent||'')&&!x.disabled);if(b)b.click();else e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}))})()`)}
  async readAnswer(previous:string){return this.cdp.evaluate<string>(`(()=>{const p=${JSON.stringify(previous)};const n=[...document.querySelectorAll('[class*="message"],[class*="markdown"],main article')].map(x=>(x.innerText||'').trim()).filter(x=>x&&x!==p);return n.at(-1)||''})()`)}
