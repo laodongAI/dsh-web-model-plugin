@@ -59,7 +59,8 @@ export function registerRoutes(m:AccountManager,register:(r:Route)=>()=>void){
   }catch(error){return json(s,{error:error instanceof Error?error.message:String(error)},400)}
  }})
 
- return()=>routes.map(register).forEach(dispose=>dispose())
+ const disposers=routes.map(register)
+ return()=>disposers.forEach(dispose=>dispose())
 }
 
 async function body(q:IncomingMessage){
