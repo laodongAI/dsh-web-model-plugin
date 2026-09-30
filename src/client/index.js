@@ -1,6 +1,5 @@
 const React=require('react')
 const {createElement,useEffect,useMemo,useState}=React
-const {useTabInfo}=require('@deepseek-ai/dsh-client-ui-sidebar-right/client')
 
 const PROVIDERS=[
  ['deepseek','DeepSeek'],['chatgpt','ChatGPT'],['qwen','Qwen'],
@@ -15,25 +14,30 @@ async function api(path,options){
  return data
 }
 
-function BrowserLiveView(){
- const info=useTabInfo()
+function BrowserLiveView(props){
+ const info=props.useTabInfo()
  const accountId=info?.tab?.navigation?.params?.accountId
  const [view,setView]=useState(null)
  const [error,setError]=useState('')
  const [loading,setLoading]=useState(true)
+
  async function refresh(){
   try{
    const q=accountId?'?accountId='+encodeURIComponent(accountId):''
    const data=await api('/api/dsh-account-models/browser/view'+q)
    setView(data);setError('')
-  }catch(e){setError(e.message);setView(null)}
-  finally{setLoading(false)}
+  }catch(e){
+   setError(e instanceof Error?e.message:String(e));setView(null)
+  }finally{setLoading(false)}
  }
+
  useEffect(()=>{
-  setLoading(true);void refresh()
+  setLoading(true)
+  void refresh()
   const timer=setInterval(()=>void refresh(),1500)
   return()=>clearInterval(timer)
  },[accountId])
+
  return createElement('div',{style:{height:'100%',display:'flex',flexDirection:'column',background:'#111',color:'#eee'}},
   createElement('div',{style:{padding:'10px 12px',display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',borderBottom:'1px solid #333'}},
    createElement('div',null,
@@ -59,6 +63,7 @@ function WebAiSettingsPage({openLive}){
  const [loading,setLoading]=useState(true)
  const [busy,setBusy]=useState('')
  const [message,setMessage]=useState('')
+
  async function refresh(){
   setLoading(true)
   try{
@@ -66,26 +71,46 @@ function WebAiSettingsPage({openLive}){
    setAccounts(a);setConfig(c)
    setProvider(c.defaultProvider||a[0]?.provider||'deepseek')
    setAccountId(c.defaultAccountId||a[0]?.id||'')
+  }catch(e){
+   setMessage(e instanceof Error?e.message:String(e))
   }finally{setLoading(false)}
  }
+
  useEffect(()=>{void refresh()},[])
+
  const filtered=useMemo(()=>accounts.filter(a=>a.provider===provider),[accounts,provider])
+
  async function addAccount(){
   setBusy('add');setMessage('')
-  try{await api('/api/dsh-account-models/accounts/add',{method:'POST',body:JSON.stringify({provider})});await refresh();setMessage('浏览器已打开，请完成网页登录，然后点击“检查登录状态”。')}
-  catch(e){setMessage(e.message)}finally{setBusy('')}
+  try{
+   await api('/api/dsh-account-models/accounts/add',{method:'POST',body:JSON.stringify({provider})})
+   await refresh()
+   setMessage('浏览器已打开，请完成网页登录，然后点击“检查登录状态”。')
+  }catch(e){setMessage(e instanceof Error?e.message:String(e))}
+  finally{setBusy('')}
  }
+
  async function check(id){
   setBusy(id);setMessage('')
-  try{const a=await api('/api/dsh-account-models/accounts/'+id+'/check',{method:'POST'});setAccounts(v=>v.map(x=>x.id===a.id?a:x));setMessage(a.status==='ready'?'登录状态：已就绪':'登录状态：仍需登录')}
-  catch(e){setMessage(e.message)}finally{setBusy('')}
+  try{
+   const a=await api('/api/dsh-account-models/accounts/'+id+'/check',{method:'POST'})
+   setAccounts(v=>v.map(x=>x.id===a.id?a:x))
+   setMessage(a.status==='ready'?'登录状态：已就绪':'登录状态：仍需登录')
+  }catch(e){setMessage(e instanceof Error?e.message:String(e))}
+  finally{setBusy('')}
  }
+
  async function save(){
   setBusy('save');setMessage('')
-  try{const c=await api('/api/dsh-account-models/config',{method:'POST',body:JSON.stringify({defaultProvider:provider,defaultAccountId:accountId})});setConfig(c);setMessage('默认 Web AI Provider 已保存')}
-  catch(e){setMessage(e.message)}finally{setBusy('')}
+  try{
+   const c=await api('/api/dsh-account-models/config',{method:'POST',body:JSON.stringify({defaultProvider:provider,defaultAccountId:accountId})})
+   setConfig(c);setMessage('默认 Web AI Provider 已保存')
+  }catch(e){setMessage(e instanceof Error?e.message:String(e))}
+  finally{setBusy('')}
  }
+
  if(loading)return createElement('div',{style:{padding:24}},'正在加载 Web AI 配置…')
+
  return createElement('div',{style:{padding:'24px 28px',maxWidth:760}},
   createElement('div',{style:{marginBottom:20}},
    createElement('h2',{style:{margin:'0 0 6px'}},'Web AI 浏览器模型'),
@@ -99,11 +124,11 @@ function WebAiSettingsPage({openLive}){
    createElement('div',{style:{marginTop:14}},
     createElement('div',{style:{marginBottom:8}},'浏览器账号'),
     filtered.length?filtered.map(a=>createElement('label',{key:a.id,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0'}},
-      createElement('input',{type:'radio',name:'web-ai-account',checked:accountId===a.id,onChange:()=>setAccountId(a.id)}),
-      createElement('span',null,a.displayName),
-      createElement('span',{style:{opacity:.65}},a.status==='ready'?'● 已就绪':a.status==='login_required'?'○ 需要登录':'○ '+a.status),
-      createElement('button',{type:'button',disabled:busy===a.id,onClick:()=>check(a.id),style:{marginLeft:'auto'}},busy===a.id?'检查中…':'检查登录状态')
-     )):createElement('div',{style:{opacity:.7}},'当前 Provider 尚未添加浏览器账号。'),
+     createElement('input',{type:'radio',name:'web-ai-account',checked:accountId===a.id,onChange:()=>setAccountId(a.id)}),
+     createElement('span',null,a.displayName),
+     createElement('span',{style:{opacity:.65}},a.status==='ready'?'● 已就绪':a.status==='login_required'?'○ 需要登录':'○ '+a.status),
+     createElement('button',{type:'button',disabled:busy===a.id,onClick:()=>check(a.id),style:{marginLeft:'auto'}},busy===a.id?'检查中…':'检查登录状态')
+    )):createElement('div',{style:{opacity:.7}},'当前 Provider 尚未添加浏览器账号。'),
     createElement('button',{type:'button',disabled:busy==='add',onClick:addAccount,style:{marginTop:8}},busy==='add'?'正在启动浏览器…':'添加并打开浏览器')
    )
   ),
@@ -116,21 +141,30 @@ function WebAiSettingsPage({openLive}){
  )
 }
 
-export const inject=['slots','sidebarRightTabs','sidebarRight']
-export function apply(ctx){
+const inject=['slots','sidebarRightTabs','sidebarRight']
+
+function apply(ctx){
  ctx.effect(()=>ctx.sidebarRightTabs.register({
   id:'dsh-account-models-browser',
   kind:'web-ai-browser',
   title:()=> 'Web AI 浏览器',
+  guide:{order:80,title:()=> 'Web AI 浏览器',description:()=> '查看当前 Web AI 浏览器会话。'},
  }), 'web ai browser tab')
+
  ctx.slots.inject('sidebar.right.pane.tab',()=>ctx.slots.register(
   {name:'sidebar.right.pane.tab',key:'dsh-account-models-browser'},
   BrowserLiveView,
  ))
+
  ctx.slots.inject('settings.section',()=>ctx.slots.register({
   name:'settings.section',
   id:'dsh-account-models',
   order:30,
   label:()=> 'Web AI',
- },props=>createElement(WebAiSettingsPage,{...props,openLive:(accountId)=>ctx.sidebarRight.openTab('web-ai-browser',{params:{accountId}})}))
+ },props=>createElement(WebAiSettingsPage,{
+  ...props,
+  openLive:(accountId)=>ctx.sidebarRight.openTab('web-ai-browser',{params:{accountId}})
+ })))
 }
+
+module.exports={inject,apply}
