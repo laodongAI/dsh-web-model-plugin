@@ -1,5 +1,6 @@
 const React=require('react')
 const {createElement,useEffect,useMemo,useState}=React
+const {useTabInfo}=require('@deepseek-ai/dsh-client-ui-sidebar-right/client')
 
 const PROVIDERS=[
  ['deepseek','DeepSeek'],['chatgpt','ChatGPT'],['qwen','Qwen'],
@@ -14,7 +15,43 @@ async function api(path,options){
  return data
 }
 
-function WebAiSettingsPage({close}){
+function BrowserLiveView(){
+ const info=useTabInfo()
+ const accountId=info?.tab?.navigation?.params?.accountId
+ const [view,setView]=useState(null)
+ const [error,setError]=useState('')
+ const [loading,setLoading]=useState(true)
+ async function refresh(){
+  try{
+   const q=accountId?'?accountId='+encodeURIComponent(accountId):''
+   const data=await api('/api/dsh-account-models/browser/view'+q)
+   setView(data);setError('')
+  }catch(e){setError(e.message);setView(null)}
+  finally{setLoading(false)}
+ }
+ useEffect(()=>{
+  setLoading(true);void refresh()
+  const timer=setInterval(()=>void refresh(),1500)
+  return()=>clearInterval(timer)
+ },[accountId])
+ return createElement('div',{style:{height:'100%',display:'flex',flexDirection:'column',background:'#111',color:'#eee'}},
+  createElement('div',{style:{padding:'10px 12px',display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',borderBottom:'1px solid #333'}},
+   createElement('div',null,
+    createElement('strong',null,view?.displayName||'Web AI 浏览器'),
+    createElement('div',{style:{fontSize:12,opacity:.65}},view?.url||'等待浏览器页面…')
+   ),
+   createElement('button',{type:'button',onClick:()=>void refresh},'刷新')
+  ),
+  createElement('div',{style:{flex:1,overflow:'auto',display:'flex',alignItems:'flex-start',justifyContent:'center',padding:10}},
+   loading&&!view?createElement('div',{style:{padding:24,opacity:.7}},'正在读取浏览器画面…'):
+   error?createElement('div',{style:{padding:24,color:'#ffb4ab'}},error):
+   view?createElement('img',{src:view.image,alt:'Web AI 浏览器实时画面',style:{display:'block',width:'100%',height:'auto',borderRadius:6}}):
+   null
+  )
+ )
+}
+
+function WebAiSettingsPage({openLive}){
  const [accounts,setAccounts]=useState([])
  const [config,setConfig]=useState({})
  const [provider,setProvider]=useState('deepseek')
@@ -22,14 +59,10 @@ function WebAiSettingsPage({close}){
  const [loading,setLoading]=useState(true)
  const [busy,setBusy]=useState('')
  const [message,setMessage]=useState('')
-
  async function refresh(){
   setLoading(true)
   try{
-   const [a,c]=await Promise.all([
-    api('/api/dsh-account-models/accounts'),
-    api('/api/dsh-account-models/config'),
-   ])
+   const [a,c]=await Promise.all([api('/api/dsh-account-models/accounts'),api('/api/dsh-account-models/config')])
    setAccounts(a);setConfig(c)
    setProvider(c.defaultProvider||a[0]?.provider||'deepseek')
    setAccountId(c.defaultAccountId||a[0]?.id||'')
@@ -37,7 +70,6 @@ function WebAiSettingsPage({close}){
  }
  useEffect(()=>{void refresh()},[])
  const filtered=useMemo(()=>accounts.filter(a=>a.provider===provider),[accounts,provider])
-
  async function addAccount(){
   setBusy('add');setMessage('')
   try{await api('/api/dsh-account-models/accounts/add',{method:'POST',body:JSON.stringify({provider})});await refresh();setMessage('浏览器已打开，请完成网页登录，然后点击“检查登录状态”。')}
@@ -53,19 +85,15 @@ function WebAiSettingsPage({close}){
   try{const c=await api('/api/dsh-account-models/config',{method:'POST',body:JSON.stringify({defaultProvider:provider,defaultAccountId:accountId})});setConfig(c);setMessage('默认 Web AI Provider 已保存')}
   catch(e){setMessage(e.message)}finally{setBusy('')}
  }
-
  if(loading)return createElement('div',{style:{padding:24}},'正在加载 Web AI 配置…')
  return createElement('div',{style:{padding:'24px 28px',maxWidth:760}},
-  createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}},
-   createElement('div',null,
-    createElement('h2',{style:{margin:'0 0 6px'}},'Web AI 浏览器模型'),
-    createElement('div',{style:{opacity:.7}},'通过可见 Chromium 浏览器使用 Web AI，不保存密码、Cookie 或 Token。')
-   ),
-   close?createElement('button',{onClick:close},'关闭'):null
+  createElement('div',{style:{marginBottom:20}},
+   createElement('h2',{style:{margin:'0 0 6px'}},'Web AI 浏览器模型'),
+   createElement('div',{style:{opacity:.7}},'通过可见 Chromium 浏览器使用 Web AI，不保存密码、Cookie 或 Token。')
   ),
   createElement('section',{style:{padding:16,border:'1px solid currentColor',borderRadius:10,marginBottom:16}},
    createElement('h3',null,'默认 Provider'),
-   createElement('select',{value:provider,onChange:e=>{setProvider(e.target.value);setAccountId('')} ,style:{padding:8,minWidth:300}},
+   createElement('select',{value:provider,onChange:e=>{setProvider(e.target.value);setAccountId('')},style:{padding:8,minWidth:300}},
     PROVIDERS.map(([id,name])=>createElement('option',{key:id,value:id},name))
    ),
    createElement('div',{style:{marginTop:14}},
@@ -81,18 +109,28 @@ function WebAiSettingsPage({close}){
   ),
   createElement('div',{style:{display:'flex',alignItems:'center',gap:12}},
    createElement('button',{type:'button',disabled:!accountId||busy==='save',onClick:save},busy==='save'?'保存中…':'保存默认 Provider'),
+   createElement('button',{type:'button',disabled:!accountId,onClick:()=>openLive(accountId)},'打开浏览器交互'),
    message?createElement('span',{style:{opacity:.75}},message):null
   ),
   config.defaultAccountId?createElement('div',{style:{marginTop:18,opacity:.65}},'当前默认账号：'+config.defaultAccountId):null
  )
 }
 
-export const inject=['slots']
+export const inject=['slots','sidebarRightTabs']
 export function apply(ctx){
+ ctx.effect(()=>ctx.sidebarRightTabs.register({
+  id:'dsh-account-models-browser',
+  kind:'web-ai-browser',
+  title:()=> 'Web AI 浏览器',
+ }), 'web ai browser tab')
+ ctx.slots.inject('sidebar.right.pane.tab',()=>ctx.slots.register(
+  {name:'sidebar.right.pane.tab',key:'dsh-account-models-browser'},
+  BrowserLiveView,
+ ))
  ctx.slots.inject('settings.section',()=>ctx.slots.register({
   name:'settings.section',
   id:'dsh-account-models',
   order:30,
   label:()=> 'Web AI',
- },WebAiSettingsPage))
+ },props=>createElement(WebAiSettingsPage,{...props,openLive:(accountId)=>ctx.sidebarRight.openTab('web-ai-browser',{params:{accountId}})}))
 }
