@@ -25,26 +25,26 @@ export const Config:Schema<Config>=Schema.object({
 
 export const inject=['llm','webServer','attachments']
 
-export function apply(ctx:Context,config:Config){
+export async function apply(ctx:Context,config:Config){
  const accounts=new AccountManager(
   {chromePath:config.chromePath,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs},
   {streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs},
  )
- let disposed=false
 
- void accounts.init().then(()=>{
-  if(disposed){void accounts.dispose();return}
-  const adapter=new DshBrowserAdapter(accounts,ctx.attachments)
-  const disposeAdapter=ctx.llm.registerAdapter(['web-ai'],adapter)
-  const disposeRoutes=registerRoutes(accounts,r=>ctx.webServer.register(r))
-  ctx.effect(()=>{
-   return async()=>{
-    disposeAdapter()
-    disposeRoutes()
-    await accounts.dispose()
-   }
-  },'dsh-account-models')
- }).catch(error=>ctx.logger.error(error))
+ // 初始化必须属于插件启动阶段。
+ // 如果持久化配置、账号存储或依赖服务初始化失败，应让 Cordis 将该 entry 标记为 FAILED，
+ // 而不是在 apply 返回后异步吞掉错误，避免最终只看到“entry did not activate”。
+ await accounts.init()
 
- ctx.effect(()=>()=>{disposed=true},'dsh-account-models-init-guard')
+ const adapter=new DshBrowserAdapter(accounts,ctx.attachments)
+ const disposeAdapter=ctx.llm.registerAdapter(['web-ai'],adapter)
+ const disposeRoutes=registerRoutes(accounts,r=>ctx.webServer.register(r))
+
+ ctx.effect(()=>{
+  return async()=>{
+   disposeAdapter()
+   disposeRoutes()
+   await accounts.dispose()
+  }
+ },'dsh-account-models')
 }
