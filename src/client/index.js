@@ -14,47 +14,6 @@ async function api(path,options){
  return data
 }
 
-function BrowserLiveView(props){
- const info=props.useTabInfo()
- const accountId=info?.tab?.navigation?.params?.accountId
- const [view,setView]=useState(null)
- const [error,setError]=useState('')
- const [loading,setLoading]=useState(true)
-
- async function refresh(){
-  try{
-   const q=accountId?'?accountId='+encodeURIComponent(accountId):''
-   const data=await api('/api/dsh-account-models/browser/view'+q)
-   setView(data);setError('')
-  }catch(e){
-   setError(e instanceof Error?e.message:String(e));setView(null)
-  }finally{setLoading(false)}
- }
-
- useEffect(()=>{
-  setLoading(true)
-  void refresh()
-  const timer=setInterval(()=>void refresh(),1500)
-  return()=>clearInterval(timer)
- },[accountId])
-
- return createElement('div',{style:{height:'100%',display:'flex',flexDirection:'column',background:'#111',color:'#eee'}},
-  createElement('div',{style:{padding:'10px 12px',display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',borderBottom:'1px solid #333'}},
-   createElement('div',null,
-    createElement('strong',null,view?.displayName||'Web AI 浏览器'),
-    createElement('div',{style:{fontSize:12,opacity:.65}},view?.url||'等待浏览器页面…')
-   ),
-   createElement('button',{type:'button',onClick:()=>void refresh},'刷新')
-  ),
-  createElement('div',{style:{flex:1,overflow:'auto',display:'flex',alignItems:'flex-start',justifyContent:'center',padding:10}},
-   loading&&!view?createElement('div',{style:{padding:24,opacity:.7}},'正在读取浏览器画面…'):
-   error?createElement('div',{style:{padding:24,color:'#ffb4ab'}},error):
-   view?createElement('img',{src:view.image,alt:'Web AI 浏览器实时画面',style:{display:'block',width:'100%',height:'auto',borderRadius:6}}):
-   null
-  )
- )
-}
-
 function WebAiSettingsPage({openLive}){
  const [accounts,setAccounts]=useState([])
  const [config,setConfig]=useState({})
@@ -155,40 +114,16 @@ function WebAiSettingsPage({openLive}){
 
 const inject=['slots']
 
-function registerSettings(ctx){
+const inject=['slots']
+
+function apply(ctx){
+ console.info('[dsh-account-models] client apply')
  ctx.slots.inject('settings.section',()=>ctx.slots.register({
   name:'settings.section',
   id:'dsh-account-models',
   order:30,
   label:()=> 'Web AI',
- },props=>createElement(WebAiSettingsPage,{
-  ...props,
-  openLive:(accountId)=>{
-   try{ctx.sidebarRight.openTab('web-ai-browser',{params:{accountId}})}catch(error){console.error('[dsh-account-models] open browser tab failed',error)}
-  }
- })))
-}
-
-function registerSidebar(ctx){
- ctx.effect(()=>ctx.sidebarRightTabs.register({
-  id:'dsh-account-models-browser',
-  kind:'web-ai-browser',
-  title:()=> 'Web AI 浏览器',
-  guide:{order:80,title:()=> 'Web AI 浏览器',description:()=> '查看当前 Web AI 浏览器会话。'},
- }), 'web ai browser tab')
-
- ctx.slots.inject('sidebar.right.pane.tab',()=>ctx.slots.register(
-  {name:'sidebar.right.pane.tab',key:'dsh-account-models-browser'},
-  BrowserLiveView,
- ))
-}
-
-function apply(ctx){
- console.info('[dsh-account-models] client apply')
- registerSettings(ctx)
- ctx.inject(['sidebarRightTabs','sidebarRight'],()=>{
-  try{registerSidebar(ctx);console.info('[dsh-account-models] sidebar services ready')}
-  catch(error){console.error('[dsh-account-models] sidebar registration failed',error)}
- })
+ },props=>createElement(WebAiSettingsPage,{...props,openLive:()=>{}})))
+ console.info('[dsh-account-models] client settings registered')
 }
 module.exports={inject,apply}
