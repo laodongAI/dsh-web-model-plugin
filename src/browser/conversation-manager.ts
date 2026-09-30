@@ -23,6 +23,6 @@ export class BrowserConversationManager{
    const current=tabs.find(t=>t.id===binding.tabId)
    if(current){binding.url=current.url;binding.lastUsedAt=new Date().toISOString();return current}
   }
-  return tabs.find(t=>/^https:\/\/(chat\.)?(deepseek|chatgpt)\.com/i.test(t.url))??null
+  return tabs.find(t=>/^https:\/\/(chat\.)?(deepseek|chatgpt)\.com|^https:\/\/chat\.qwen\.ai/i.test(t.url))??null
  }
 }
