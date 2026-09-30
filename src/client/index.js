@@ -116,7 +116,7 @@ function WebAiSettingsPage({openLive}){
  )
 }
 
-export const inject=['slots','sidebarRightTabs']
+export const inject=['slots','sidebarRightTabs','sidebarRight']
 export function apply(ctx){
  ctx.effect(()=>ctx.sidebarRightTabs.register({
   id:'dsh-account-models-browser',
