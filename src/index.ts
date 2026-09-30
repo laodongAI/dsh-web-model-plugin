@@ -1,4 +1,7 @@
 import type {Context} from '@deepseek-ai/cordis'
+import {appendFile, mkdir} from 'node:fs/promises'
+import {join} from 'node:path'
+import {homedir} from 'node:os'
 import Schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import {AccountManager} from './account-manager.js'
@@ -25,7 +28,18 @@ export const Config:Schema<Config>=Schema.object({
 
 export const inject=['llm','webServer','attachments']
 
+const BOOT_LOG=join(homedir(),'.dsh','account-models','plugin-startup.log')
+
+async function bootLog(message:string){
+ try{
+  await mkdir(join(homedir(),'.dsh','account-models'),{recursive:true})
+  await appendFile(BOOT_LOG,`[${new Date().toISOString()}] ${message}\\n`,'utf8')
+ }catch{}
+}
+
 export async function apply(ctx:Context,config:Config){
+ await bootLog('apply: entered')
+ try{
  const accounts=new AccountManager(
   {chromePath:config.chromePath,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs},
   {streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs},
@@ -34,11 +48,16 @@ export async function apply(ctx:Context,config:Config){
  // 初始化必须属于插件启动阶段。
  // 如果持久化配置、账号存储或依赖服务初始化失败，应让 Cordis 将该 entry 标记为 FAILED，
  // 而不是在 apply 返回后异步吞掉错误，避免最终只看到“entry did not activate”。
+ await bootLog('apply: AccountManager created')
  await accounts.init()
+ await bootLog('apply: accounts.init completed')
 
  const adapter=new DshBrowserAdapter(accounts,ctx.attachments)
+ await bootLog('apply: adapter created')
  const disposeAdapter=ctx.llm.registerAdapter(['web-ai'],adapter)
+ await bootLog('apply: llm adapter registered')
  const disposeRoutes=registerRoutes(accounts,r=>ctx.webServer.register(r))
+ await bootLog('apply: routes registered')
 
  ctx.effect(()=>{
   return async()=>{
@@ -47,4 +66,11 @@ export async function apply(ctx:Context,config:Config){
    await accounts.dispose()
   }
  },'dsh-account-models')
+ await bootLog('apply: completed')
+ }catch(error){
+  const detail=error instanceof Error ? (error.stack??error.message) : String(error)
+  await bootLog(`apply: FAILED\\n${detail}`)
+  try{process.stderr.write(`[dsh-account-models] ${detail}\\n`)}catch{}
+  throw error
+ }
 }
