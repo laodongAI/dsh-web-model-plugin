@@ -12,14 +12,12 @@
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./client": {
-      "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
-    "lib/client.js",
     "cordis.patch.yml",
     "README.md"
   ],
@@ -30,7 +28,9 @@
     "@deepseek-ai/cordis": "~4.0.4",
     "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-attachment": "0.2.0-rc.2"
+    "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.0-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.4",
@@ -38,7 +38,9 @@
     "typescript": "^5.8.0",
     "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
     "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.0-rc.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
@@ -51,7 +53,8 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
       ]
     }
   },
