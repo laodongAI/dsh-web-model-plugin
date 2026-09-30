@@ -22,8 +22,8 @@ export interface Config {
 export const Config:Schema<Config>=Schema.object({
  chromePath:Schema.string().role('path').default(undefined as unknown as string),
  cdpReadyTimeoutMs:Schema.number().min(1000).default(20000),
- streamTimeoutMs:Schema.number().min(10000).default(180000),
- noStartTimeoutMs:Schema.number().min(1000).default(60000),
+ streamTimeoutMs:Schema.number().min(10000).default(600000),
+ noStartTimeoutMs:Schema.number().min(1000).default(300000),
  uploadTimeoutMs:Schema.number().min(1000).default(15000),
 })
 
