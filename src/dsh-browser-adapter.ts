@@ -1,16 +1,16 @@
 import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResolvedModelInfo,type StreamChunk} from '@deepseek-ai/dsh-llm'
 import type {AccountManager} from './account-manager.js'
 import type {AccountProvider} from './types.js'
-const ROUTES:Record<AccountProvider,string>={deepseek:'deepseek-web',chatgpt:'chatgpt-web'}
+const ROUTES:Record<AccountProvider,string>={deepseek:'deepseek-web',chatgpt:'chatgpt-web',qwen:'qwen-web'}
 const prefix=(p:AccountProvider)=>ROUTES[p]
 const idOf=(p:AccountProvider,id:string)=>`${prefix(p)}:${id}`
 const accountIdOf=(id:string)=>id.includes(':')?id.slice(id.indexOf(':')+1):id
 
 export class DshBrowserAdapter extends LlmAdapter{
  constructor(private readonly accounts:AccountManager){super()}
- providerInfo(provider:string){return {id:provider,name:provider==='deepseek-web'?'DeepSeek Web':'ChatGPT Web'}}
+ providerInfo(provider:string){return {id:provider,name:provider==='deepseek-web'?'DeepSeek Web':provider==='chatgpt-web'?'ChatGPT Web':'Qwen Web'}}
  async listModels(provider:string):Promise<readonly LlmModelInfo[]>{
-  const p=provider==='deepseek-web'?'deepseek':provider==='chatgpt-web'?'chatgpt':null
+  const p=provider==='deepseek-web'?'deepseek':provider==='chatgpt-web'?'chatgpt':provider==='qwen-web'?'qwen':null
   if(!p)return []
   return this.accounts.list().filter(a=>a.provider===p).map(a=>({provider,id:idOf(p,a.id),name:a.displayName,description:a.status==='ready'?'浏览器会话已登录':a.status==='login_required'?'需要登录':'浏览器会话状态未知'}))
  }
