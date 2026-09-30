@@ -25,7 +25,7 @@ export class DefaultBrowserProvider implements BrowserProvider {
  }
 
  private async page(sessionId:string,accountId:string){
-  const tab=await this.conversations.findTab(this.port,sessionId,accountId)
+  const tab=await this.conversations.findTab(this.port,sessionId,accountId,this.provider)
   if(!tab)throw new Error('PAGE_CHANGED: 没有找到可绑定的浏览器页面，请先打开账号窗口')
   const cdp=await connectTab(tab)
   const page=this.createPage(cdp)
