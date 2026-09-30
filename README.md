@@ -96,12 +96,12 @@ dsh.cmd plugin --profile desktop remove dsh-account-models
 4. 手工完成网页登录并检查登录状态。
 5. 保存默认 Provider / Account。
 6. DSH 模型选择器出现一个统一的 Web AI（浏览器）。
-7. 普通 DSH 对话能够通过网页模型增量返回，长 Thinking 不因 60 秒无首字超时提前失败。
+7. 普通 DSH 对话能够通过网页模型完成请求，Web AI 长 Thinking 不再因默认 60 秒无首字超时提前失败。
 8. 同一 DSH Session 保持对应网页 Conversation。
 9. 当 DSH 提供 tools 时，Web AI 可以通过工具调用协议请求本地 Agent Tool，由 DSH 执行后继续下一轮模型推理。
-9. Stop 能停止网页生成。
-10. 手工切换网页 Conversation 后应返回 PAGE_CHANGED。
-11. Right Sidebar 的 Web AI 浏览器能够显示真实 Chromium 页面。
+10. Stop 能停止网页生成。
+11. 手工切换网页 Conversation 后应返回 PAGE_CHANGED。
+12. Right Sidebar 的 Web AI 浏览器能够显示真实 Chromium 页面。
 
 ## 当前边界
 Right Sidebar 当前采用 CDP 截图 Live View，而不是直接把插件自有 Chromium 页面嵌入 DSH Electron WebView。
