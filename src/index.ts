@@ -16,7 +16,7 @@ export interface Config {
 }
 
 export const Config:Schema<Config>=Schema.object({
- chromePath:Schema.string().role('path').optional(),
+ chromePath:Schema.string().role('path'),
  cdpReadyTimeoutMs:Schema.number().min(1000).default(20000),
  streamTimeoutMs:Schema.number().min(10000).default(180000),
  noStartTimeoutMs:Schema.number().min(1000).default(60000),
