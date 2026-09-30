@@ -5,6 +5,7 @@ import {AccountStore} from './account-store.js'
 import {BrowserManager,type BrowserManagerConfig} from './browser-manager.js'
 import type {AccountProvider,AccountSnapshot} from './types.js'
 import {DefaultBrowserProvider} from './providers/browser-provider.js'
+import type {WebPageTiming} from './providers/web-page.js'
 import {WebAiConfigStore} from './web-ai-config.js'
 import {PROVIDER_MAP} from './provider-catalog.js'
 
@@ -15,7 +16,7 @@ export class AccountManager {
  private configStore=new WebAiConfigStore(this.rootDir)
  private providers=new Map<string,DefaultBrowserProvider>()
 
- constructor(browserConfig:BrowserManagerConfig={cdpReadyTimeoutMs:20000}){
+ constructor(browserConfig:BrowserManagerConfig={cdpReadyTimeoutMs:20000},private readonly pageTiming:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){
   this.browser=new BrowserManager(browserConfig)
  }
 
@@ -62,7 +63,7 @@ export class AccountManager {
    updatedAt:now
   }
   await this.store.upsert(a)
-  this.providers.set(id,new DefaultBrowserProvider(provider,port))
+  this.providers.set(id,new DefaultBrowserProvider(provider,port,undefined,this.pageTiming))
   return this.snapshot(id)!
  }
 
@@ -70,7 +71,7 @@ export class AccountManager {
   const a=this.require(id)
   const port=await this.browser.open(id,a.provider,a.profileDir)
   await this.store.upsert({...a,debugPort:port,status:'unknown',updatedAt:new Date().toISOString()})
-  if(!this.providers.has(id))this.providers.set(id,new DefaultBrowserProvider(a.provider,port))
+  if(!this.providers.has(id))this.providers.set(id,new DefaultBrowserProvider(a.provider,port,undefined,this.pageTiming))
   return this.snapshot(id)!
  }
 
