@@ -13,6 +13,7 @@ export class BrowserConversationManager{
   this.map.set(sessionId,value);return value
  }
  get(sessionId:string){return this.map.get(sessionId)}
+ findByAccount(accountId:string){for(const v of this.map.values())if(v.accountId===accountId)return v}
  markDesynced(sessionId:string){const v=this.map.get(sessionId);if(v)v.status='desynced'}
  unbind(sessionId:string){this.map.delete(sessionId)}
  clearAccount(accountId:string){for(const [id,v] of this.map)if(v.accountId===accountId)this.map.delete(id)}
