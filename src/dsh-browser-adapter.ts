@@ -2,22 +2,22 @@ import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResol
 import type {AccountManager} from './account-manager.js'
 import type {AccountProvider} from './types.js'
 import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
-const ROUTES:Record<AccountProvider,string>={deepseek:'deepseek-web',chatgpt:'chatgpt-web',qwen:'qwen-web','tencent-yuanbao':'tencent-yuanbao-web',doubao:'doubao-web',perplexity:'perplexity-web',copilot:'copilot-web',huggingchat:'huggingchat-web',kimi:'kimi-web'}
+const ROUTES:Record<AccountProvider,string>={deepseek:'deepseek-web',chatgpt:'chatgpt-web',qwen:'qwen-web','tencent-yuanbao':'tencent-yuanbao-web',doubao:'doubao-web',perplexity:'perplexity-web',copilot:'copilot-web',huggingchat:'huggingchat-web',kimi:'kimi-web',chatglm:'chatglm-web'}
 const prefix=(p:AccountProvider)=>ROUTES[p]
 const idOf=(p:AccountProvider,id:string)=>`${prefix(p)}:${id}`
 const accountIdOf=(id:string)=>id.includes(':')?id.slice(id.indexOf(':')+1):id
 
 export class DshBrowserAdapter extends LlmAdapter{
  constructor(private readonly accounts:AccountManager,private readonly attachments:AttachmentStore){super()}
- providerInfo(provider:string){return {id:provider,name:provider==='deepseek-web'?'DeepSeek Web':provider==='chatgpt-web'?'ChatGPT Web':'Qwen Web'}}
+ providerInfo(provider:string){const names:Record<string,string>={'deepseek-web':'DeepSeek Web','chatgpt-web':'ChatGPT Web','qwen-web':'Qwen Web','tencent-yuanbao-web':'腾讯混元 AI Studio','doubao-web':'豆包 Web','perplexity-web':'Perplexity Web','copilot-web':'Microsoft Copilot Web','huggingchat-web':'HuggingChat Web','kimi-web':'Kimi Web','chatglm-web':'智谱 AI Web'};return {id:provider,name:names[provider]??provider}}
  async listModels(provider:string):Promise<readonly LlmModelInfo[]>{
-  const p=({ 'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi'} as Record<string,AccountProvider|undefined>)[provider]??null
+  const p=({ 'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi','chatglm-web':'chatglm'} as Record<string,AccountProvider|undefined>)[provider]??null
   if(!p)return []
   return this.accounts.list().filter(a=>a.provider===p).map(a=>({provider,id:idOf(p,a.id),name:a.displayName,description:a.status==='ready'?'浏览器会话已登录':a.status==='login_required'?'需要登录':'浏览器会话状态未知'}))
  }
  async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
   if(signal?.aborted)throw signal.reason??new Error('请求已取消')
-  const p=provider==='deepseek-web'?'deepseek':provider==='chatgpt-web'?'chatgpt':provider==='qwen-web'?'qwen':null
+  const p=provider==='deepseek-web'?'deepseek':provider==='chatgpt-web'?'chatgpt':provider==='qwen-web'?'qwen':provider==='chatglm-web'?'chatglm':null
   if(!p)throw new LlmError(`未知 Web Provider：${provider}`,'MODEL_UNAVAILABLE')
   const accountId=accountIdOf(model)
   const account=this.accounts.list().find(a=>a.id===accountId&&a.provider===p)
@@ -25,7 +25,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   return {provider,id:idOf(p,account.id),name:account.displayName,inputModalities:['text','image']}
  }
  async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
-  const p=({ 'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi'} as Record<string,AccountProvider|undefined>)[options.provider]??null
+  const p=({ 'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi','chatglm-web':'chatglm'} as Record<string,AccountProvider|undefined>)[options.provider]??null
   if(!p)throw new LlmError('未找到 Web Provider','MODEL_UNAVAILABLE')
   const accountId=accountIdOf(options.model)
   const account=this.accounts.list().find(a=>a.id===accountId&&a.provider===p)
