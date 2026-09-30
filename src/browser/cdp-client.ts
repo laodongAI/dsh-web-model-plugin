@@ -17,12 +17,25 @@ export async function connectTab(tab:CdpTab):Promise<CdpClient>{
  const ws=new WebSocket(tab.webSocketDebuggerUrl);await waitOpen(ws)
  let id=0
  const pending=new Map<number,{resolve:(v:any)=>void;reject:(e:any)=>void}>()
+ const rejectPending=(error:Error)=>{for(const p of pending.values())p.reject(error);pending.clear()}
  ws.onmessage=e=>{const m=JSON.parse(String(e.data));if(m.id&&pending.has(m.id)){const p=pending.get(m.id)!;pending.delete(m.id);m.error?p.reject(new Error(m.error.message||'CDP error')):p.resolve(m.result)}}
- const call=(method:string,params:Record<string,unknown>={})=>new Promise<any>((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});ws.send(JSON.stringify({id:n,method,params}))})
+ ws.addEventListener('close',()=>rejectPending(new Error('CDP WebSocket 已断开')))
+ ws.addEventListener('error',()=>rejectPending(new Error('CDP WebSocket 发生错误')))
+ const call=(method:string,params:Record<string,unknown>={})=>new Promise<any>((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});try{ws.send(JSON.stringify({id:n,method,params}))}catch(error){pending.delete(n);reject(error)}})
  await call('Runtime.enable')
+ await call('Page.enable')
  return {
-  async evaluate<T>(expression:string){const result=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.text||'页面脚本执行失败');return result.result?.result?.value as T},
-  async screenshot(){const result=await call('Page.captureScreenshot',{format:'jpeg',quality:72});return {data:result.data as string}},
+  async evaluate<T>(expression:string){
+   const result=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true})
+   if(result.exceptionDetails){
+    throw new Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text||'页面脚本执行失败')
+   }
+   return result.result?.value as T
+  },
+  async screenshot(){
+   const result=await call('Page.captureScreenshot',{format:'jpeg',quality:72})
+   return {data:result.data as string}
+  },
   async setFileInputFiles(selector:string,files:readonly string[]){
    await call('DOM.enable')
    const root=await call('DOM.getDocument',{depth:1})
@@ -31,7 +44,7 @@ export async function connectTab(tab:CdpTab):Promise<CdpClient>{
    await call('DOM.setFileInputFiles',{nodeId:node.nodeId,files:[...files]})
    await call('Runtime.evaluate',{expression:`(()=>{const el=document.querySelector(${JSON.stringify(selector)});if(el){el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}})()`})
   },
-  async close(){for(const p of pending.values())p.reject(new Error('CDP closed'));pending.clear();ws.close()}
+  async close(){rejectPending(new Error('CDP closed'));ws.close()}
  }
 }
 function httpGet(port:number,path:string):Promise<string>{return new Promise((resolve,reject)=>{const req=request({host:'127.0.0.1',port,path},res=>{const a:Buffer[]=[];res.on('data',c=>a.push(Buffer.from(c)));res.on('end',()=>res.statusCode===200?resolve(Buffer.concat(a).toString('utf8')):reject(new Error('CDP HTTP '+res.statusCode)))});req.on('error',reject);req.end()})}
