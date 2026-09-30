@@ -38,8 +38,9 @@ async function bootLog(message:string){
 }
 
 export async function apply(ctx:Context,config:Config){
- await bootLog('apply: entered')
+ await bootLog(`apply: entered; pid=${process.pid}; node=${process.version}; cwd=${process.cwd()}`)
  try{
+ await bootLog(`config: ${JSON.stringify({chromePath:config.chromePath??null,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs,streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})}`)
  const accounts=new AccountManager(
   {chromePath:config.chromePath,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs},
   {streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs},
@@ -49,14 +50,19 @@ export async function apply(ctx:Context,config:Config){
  // 如果持久化配置、账号存储或依赖服务初始化失败，应让 Cordis 将该 entry 标记为 FAILED，
  // 而不是在 apply 返回后异步吞掉错误，避免最终只看到“entry did not activate”。
  await bootLog('apply: AccountManager created')
+ await bootLog('accounts.init: starting')
  await accounts.init()
  await bootLog('apply: accounts.init completed')
 
+ await bootLog(`accounts.init: completed; accountCount=${accounts.list().length}; default=${JSON.stringify(accounts.getDefaultAccount()??null)}`)
  const adapter=new DshBrowserAdapter(accounts,ctx.attachments)
  await bootLog('apply: adapter created')
+ await bootLog('llm.registerAdapter: starting; provider=web-ai')
  const disposeAdapter=ctx.llm.registerAdapter(['web-ai'],adapter)
  await bootLog('apply: llm adapter registered')
- const disposeRoutes=registerRoutes(accounts,r=>ctx.webServer.register(r))
+ await bootLog('llm.registerAdapter: completed')
+ await bootLog('webServer routes: starting')
+ const disposeRoutes=registerRoutes(accounts,r=>{ await bootLog(`webServer.register: ${r.kind} ${r.path}`); return ctx.webServer.register(r) })
  await bootLog('apply: routes registered')
 
  ctx.effect(()=>{
@@ -66,9 +72,11 @@ export async function apply(ctx:Context,config:Config){
    await accounts.dispose()
   }
  },'dsh-account-models')
+ await bootLog('webServer routes: completed')
  await bootLog('apply: completed')
  }catch(error){
   const detail=error instanceof Error ? (error.stack??error.message) : String(error)
+  await bootLog(`apply: FAILED type=${typeof error}; name=${error instanceof Error?error.name:'unknown'}; message=${error instanceof Error?error.message:String(error)}`)
   await bootLog(`apply: FAILED\\n${detail}`)
   try{process.stderr.write(`[dsh-account-models] ${detail}\\n`)}catch{}
   throw error
