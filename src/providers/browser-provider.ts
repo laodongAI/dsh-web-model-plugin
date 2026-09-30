@@ -1,4 +1,4 @@
-import {connectTab} from '../browser/cdp-client.js'
+import {connectTab,listTabs} from '../browser/cdp-client.js'
 import {BrowserConversationManager} from '../browser/conversation-manager.js'
 import type {AccountProvider} from '../types.js'
 import type {BrowserChatRequest,BrowserProvider,BrowserProviderModel,BrowserProviderErrorCode} from './provider.js'
@@ -13,7 +13,7 @@ export class DefaultBrowserProvider implements BrowserProvider {
   return {cdp,page:this.provider==='deepseek'?new DeepSeekPage(cdp):new ChatGptPage(cdp)}
  }
  async listModels():Promise<readonly BrowserProviderModel[]>{return this.provider==='deepseek'?[{id:'deepseek-web',name:'DeepSeek Web'}]:[{id:'chatgpt-web',name:'ChatGPT Web'}]}
- async checkLogin(){return false}
+ async checkLogin(){const tabs=await listTabs(this.port);const tab=tabs.find(x=>this.provider==='deepseek'?/deepseek\.com/.test(x.url):/chatgpt\.com/.test(x.url));if(!tab)return false;const cdp=await connectTab(tab);try{const page=this.provider==='deepseek'?new DeepSeekPage(cdp):new ChatGptPage(cdp);return await page.isLoggedIn()}finally{await cdp.close()}}
  async *chat(req:BrowserChatRequest){
   const sessionId=req.sessionId??req.accountId
   const {page,cdp}=await this.page(sessionId,req.accountId)
