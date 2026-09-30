@@ -104,7 +104,7 @@ function WebAiSettingsPage({openLive}){
  async function check(id){
   setBusy(id);setMessage('')
   try{
-   const a=await api('/api/dsh-account-models/accounts/'+id+'/check',{method:'POST'})
+   const a=await api('/api/dsh-account-models/accounts/check',{method:'POST',body:JSON.stringify({accountId:id})})
    setAccounts(v=>v.map(x=>x.id===a.id?a:x))
    setMessage(a.status==='ready'?'登录状态：已就绪':'登录状态：仍需登录')
   }catch(e){setMessage(e instanceof Error?e.message:String(e))}
