@@ -1,52 +1,44 @@
 import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResolvedModelInfo,type StreamChunk} from '@deepseek-ai/dsh-llm'
 import type {AccountManager} from './account-manager.js'
-import type {AccountProvider} from './types.js'
 import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
+import type {AccountProvider} from './types.js'
 
-const ROUTES:Record<AccountProvider,string>={deepseek:'deepseek-web',chatgpt:'chatgpt-web',qwen:'qwen-web','tencent-yuanbao':'tencent-yuanbao-web',doubao:'doubao-web',perplexity:'perplexity-web',copilot:'copilot-web',huggingchat:'huggingchat-web',kimi:'kimi-web',chatglm:'chatglm-web'}
-const PROVIDER_OF_ROUTE:Record<string,AccountProvider>={'deepseek-web':'deepseek','chatgpt-web':'chatgpt','qwen-web':'qwen','tencent-yuanbao-web':'tencent-yuanbao','doubao-web':'doubao','perplexity-web':'perplexity','copilot-web':'copilot','huggingchat-web':'huggingchat','kimi-web':'kimi','chatglm-web':'chatglm'}
-const prefix=(p:AccountProvider)=>ROUTES[p]
-const idOf=(p:AccountProvider,id:string)=>`${prefix(p)}:${id}`
-const accountIdOf=(id:string)=>id.includes(':')?id.slice(id.indexOf(':')+1):id
+const PROVIDER_OF_ROUTE:Record<string,AccountProvider>={'web-ai':'deepseek'}
+const idOf=(id:string)=>`web-ai:${id}`
+const accountIdOf=(id:string)=>id.startsWith('web-ai:')?id.slice('web-ai:'.length):id
 
 export class DshBrowserAdapter extends LlmAdapter{
  constructor(private readonly accounts:AccountManager,private readonly attachments:AttachmentStore){super()}
 
- providerInfo(provider:string){
-  const names:Record<string,string>={'web-ai':'Web AI（浏览器）','deepseek-web':'DeepSeek Web','chatgpt-web':'ChatGPT Web','qwen-web':'Qwen Web','tencent-yuanbao-web':'腾讯混元 AI Studio','doubao-web':'豆包 Web','perplexity-web':'Perplexity Web','copilot-web':'Microsoft Copilot Web','huggingchat-web':'HuggingChat Web','kimi-web':'Kimi Web','chatglm-web':'智谱 AI Web'}
-  return {id:provider,name:names[provider]??provider}
+ override providerInfo(provider:string){
+  return {id:provider,name:'Web AI（浏览器）'}
  }
 
- async listModels(provider:string):Promise<readonly LlmModelInfo[]>{
-  if(provider==='web-ai'){
-   const a=this.accounts.getDefaultAccount()
-   return a?[{provider:'web-ai',id:`web-ai:${a.id}`,name:a.displayName,description:`${a.provider} · ${a.status==='ready'?'已登录':a.status==='login_required'?'需要登录':'浏览器会话状态未知'}`}] : []
-  }
-  const p=PROVIDER_OF_ROUTE[provider]
-  if(!p)return []
-  return this.accounts.list().filter(a=>a.provider===p).map(a=>({provider,id:idOf(p,a.id),name:a.displayName,description:a.status==='ready'?'浏览器会话已登录':a.status==='login_required'?'需要登录':'浏览器会话状态未知'}))
+ override async listModels(provider:string):Promise<readonly LlmModelInfo[]>{
+  const account=this.accounts.getDefaultAccount()
+  if(!account)return []
+  return [{
+   provider,
+   id:idOf(account.id),
+   name:account.displayName,
+   description:`${account.provider} · ${account.status==='ready'?'已登录':account.status==='login_required'?'需要登录':'浏览器会话状态未知'}`,
+   inputModalities:['text','image'],
+  }]
  }
 
- async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
+ override async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
   if(signal?.aborted)throw signal.reason??new Error('请求已取消')
-  if(provider==='web-ai'){
-   const accountId=accountIdOf(model)
-   const account=this.accounts.list().find(a=>a.id===accountId)
-   if(!account)throw new LlmError(`默认 Web AI 模型账号不存在：${model}`,'MODEL_UNAVAILABLE')
-   return {provider:'web-ai',id:`web-ai:${account.id}`,name:account.displayName,inputModalities:['text','image']}
-  }
-  const p=PROVIDER_OF_ROUTE[provider]
-  if(!p)throw new LlmError(`未知 Web Provider：${provider}`,'MODEL_UNAVAILABLE')
+  if(provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${provider}`,'MODEL_UNAVAILABLE')
   const accountId=accountIdOf(model)
-  const account=this.accounts.list().find(a=>a.id===accountId&&a.provider===p)
-  if(!account)throw new LlmError(`模型账号不存在：${model}`,'MODEL_UNAVAILABLE')
-  return {provider,id:idOf(p,account.id),name:account.displayName,inputModalities:['text','image']}
+  const account=this.accounts.list().find(a=>a.id===accountId)
+  if(!account)throw new LlmError(`Web AI 默认账号不存在：${model}`,'MODEL_UNAVAILABLE')
+  return {provider,id:idOf(account.id),name:account.displayName,inputModalities:['text','image']}
  }
 
- async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
-  const targetProvider=options.provider==='web-ai'?undefined:PROVIDER_OF_ROUTE[options.provider]
+ override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
+  if(options.provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${options.provider}`,'MODEL_UNAVAILABLE')
   const accountId=accountIdOf(options.model)
-  const account=this.accounts.list().find(a=>a.id===accountId&&(!targetProvider||a.provider===targetProvider))
+  const account=this.accounts.list().find(a=>a.id===accountId)
   if(!account)throw new LlmError('未找到所选 Web AI 模型账号','MODEL_UNAVAILABLE')
   const adapter=this.accounts.getProvider(account.id)
   if(!adapter)throw new LlmError('账号浏览器尚未启动，请先打开账号','LOGIN_REQUIRED')
@@ -70,7 +62,6 @@ export class DshBrowserAdapter extends LlmAdapter{
     answer+=delta
     yield {type:'text-delta',index:0,text:delta}
    }
-
    if(!answer)throw new LlmError('网页没有提取到模型回答','SERVICE_UNAVAILABLE')
    yield {type:'block-end',index:0,block:{type:'text',text:answer}}
    yield {type:'finish',reason:{kind:'stop'}}
