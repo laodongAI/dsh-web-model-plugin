@@ -9,10 +9,12 @@
     ".": {
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
-    }
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "files": [
     "lib",
+    "cordis.patch.yml",
     "README.md"
   ],
   "engines": {
@@ -37,8 +39,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dsh": {
-    "host": {
-      "platform": "web"
+    "bundle": {
+      "patch": "./cordis.patch.yml"
     }
   },
   "license": "MIT"
