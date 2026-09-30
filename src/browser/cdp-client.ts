@@ -4,6 +4,7 @@ export interface CdpTab { id:string; url:string; title:string; webSocketDebugger
 export interface CdpClient {
  evaluate<T>(expression:string):Promise<T>
  setFileInputFiles(selector:string,files:readonly string[]):Promise<void>
+ screenshot():Promise<{data:string;width?:number;height?:number}>
  close():Promise<void>
 }
 
@@ -21,6 +22,7 @@ export async function connectTab(tab:CdpTab):Promise<CdpClient>{
  await call('Runtime.enable')
  return {
   async evaluate<T>(expression:string){const result=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.text||'页面脚本执行失败');return result.result?.result?.value as T},
+  async screenshot(){const result=await call('Page.captureScreenshot',{format:'jpeg',quality:72});return {data:result.data as string}}
   async setFileInputFiles(selector:string,files:readonly string[]){
    await call('DOM.enable')
    const root=await call('DOM.getDocument',{depth:1})
