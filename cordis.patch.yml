@@ -1,0 +1,6 @@
+# dsh-account-models bundle
+# 将浏览器账号模型插件挂载到 DSH profile。
+# 登录流程由各目标网站自行处理；本插件只检测网页是否进入可对话状态。
+- insert:
+    - id: dsh-account-models
+      name: dsh-account-models
