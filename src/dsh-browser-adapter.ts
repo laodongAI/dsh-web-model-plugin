@@ -110,7 +110,7 @@ export class DshBrowserAdapter extends LlmAdapter{
 
  private buildBrowserPrompt(toolResult:string,userText:string,tools:NonNullable<GenerateOptions['tools']>):string{
   if(tools.length===0)return userText
-  const catalog=tools.map(tool=>JSON.stringify({name:tool.name,description:tool.description,parameters:tool.parameters})).join('\\n')
+  const catalog=tools.map(tool=>JSON.stringify({name:tool.name,description:tool.description,parameters:tool.parameters})).join('\n')
   const toolInstruction=[
    '你现在是 DSH 的 Web AI 模型。DSH 主机保留工具执行能力。',
    '如果需要使用工具，只能输出一个或多个 <dsh_tool_call>...</dsh_tool_call>，标签内部必须是 JSON：{"name":"工具名","arguments":工具参数对象}。不要把工具调用写成普通解释文字。',
