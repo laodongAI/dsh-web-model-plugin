@@ -4,12 +4,12 @@ import { registerRoutes } from './http-routes.js'
 import { DshBrowserAdapter } from './dsh-browser-adapter.js'
 
 export const name='dsh-account-models'
-export const inject=['llm','webServer']
+export const inject=['llm','webServer','attachments']
 
 export function apply(ctx:Context){
   const accounts=new AccountManager()
   void accounts.init().then(()=>{
-    const adapter=new DshBrowserAdapter(accounts)
+    const adapter=new DshBrowserAdapter(accounts,ctx.attachments)
     const disposeAdapter=ctx.llm.registerAdapter(['deepseek-web','chatgpt-web','qwen-web'],adapter)
     const disposeRoutes=registerRoutes(accounts,r=>ctx.webServer.register(r))
     ctx.effect(()=>async()=>{
