@@ -33,11 +33,12 @@ export class DshBrowserAdapter extends LlmAdapter{
   const adapter=this.accounts.getProvider(account.id)
   if(!adapter)throw new LlmError('账号浏览器尚未启动，请先打开账号','LOGIN_REQUIRED')
   const messages=options.messages.map(m=>({role:m.role,content:typeof m.content==='string'?m.content:m.content.filter(x=>x.type==='text').map(x=>x.text).join('\n')}))
+  const browserAttachments=this.collectAttachments(options.messages)
   const sessionId=options.sessionId?String(options.sessionId):account.id
   let answer=''
   try{
    yield {type:'block-start',index:0,blockType:'text'}
-   for await(const delta of adapter.chat({accountId:account.id,model:options.model,sessionId,messages,signal:options.signal})){
+   for await(const delta of adapter.chat({accountId:account.id,model:options.model,sessionId,messages,attachments:browserAttachments,signal:options.signal})){
     if(delta){answer+=delta;yield {type:'text-delta',index:0,text:delta}}
    }
    if(!answer)throw new LlmError('网页没有提取到模型回答','SERVICE_UNAVAILABLE')
@@ -48,5 +49,21 @@ export class DshBrowserAdapter extends LlmAdapter{
    const mapped=code==='LOGIN_REQUIRED'||code==='SESSION_EXPIRED'?'AUTH':code==='RATE_LIMITED'?'RATE_LIMIT':code==='QUOTA_EXCEEDED'?'QUOTA_EXCEEDED':code==='SERVICE_UNAVAILABLE'?'UNAVAILABLE':'PROVIDER_ERROR'
    throw new LlmError(error instanceof Error?error.message:String(error),mapped,{cause:error})
   }
+ }
+ private collectAttachments(messages:GenerateOptions['messages']):readonly {path:string;name?:string;kind:'image'|'file'}[]{
+  const latest=[...messages].reverse().find(m=>m.role==='user')
+  if(!latest||typeof latest.content==='string')return []
+  const result:{path:string;name?:string;kind:'image'|'file'}[]=[]
+  for(const block of latest.content){
+   if(block.type==='image'){
+    const path=this.attachments.imageHostPath(block.attachment)
+    if(path)result.push({path,name:block.attachment.name,kind:'image'})
+   }else if(block.type==='text'){
+    const match=block.text.match(/\\[File\\s+"[^"]+"\\s+\\(\\d+\\s+bytes,\\s+sha256:[^)]+\\):\\s+verbatim\\s+read-only\\s+copy\\s+saved\\s+at\\s+"([^"]+)"\\./)
+    if(match){try{result.push({path:JSON.parse('"'+match[1]+'"'),kind:'file'})}catch{}}
+   }
+  }
+  const seen=new Set<string>()
+  return result.filter(x=>seen.has(x.path)?false:(seen.add(x.path),true))
  }
 }
