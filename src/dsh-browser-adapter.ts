@@ -1,13 +1,14 @@
 import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResolvedModelInfo,type StreamChunk} from '@deepseek-ai/dsh-llm'
 import type {AccountManager} from './account-manager.js'
 import type {AccountProvider} from './types.js'
+import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
 const ROUTES:Record<AccountProvider,string>={deepseek:'deepseek-web',chatgpt:'chatgpt-web',qwen:'qwen-web'}
 const prefix=(p:AccountProvider)=>ROUTES[p]
 const idOf=(p:AccountProvider,id:string)=>`${prefix(p)}:${id}`
 const accountIdOf=(id:string)=>id.includes(':')?id.slice(id.indexOf(':')+1):id
 
 export class DshBrowserAdapter extends LlmAdapter{
- constructor(private readonly accounts:AccountManager){super()}
+ constructor(private readonly accounts:AccountManager,private readonly attachments:AttachmentStore){super()}
  providerInfo(provider:string){return {id:provider,name:provider==='deepseek-web'?'DeepSeek Web':provider==='chatgpt-web'?'ChatGPT Web':'Qwen Web'}}
  async listModels(provider:string):Promise<readonly LlmModelInfo[]>{
   const p=provider==='deepseek-web'?'deepseek':provider==='chatgpt-web'?'chatgpt':provider==='qwen-web'?'qwen':null
@@ -21,7 +22,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   const accountId=accountIdOf(model)
   const account=this.accounts.list().find(a=>a.id===accountId&&a.provider===p)
   if(!account)throw new LlmError(`模型账号不存在：${model}`,'MODEL_UNAVAILABLE')
-  return {provider,id:idOf(p,account.id),name:account.displayName,inputModalities:['text']}
+  return {provider,id:idOf(p,account.id),name:account.displayName,inputModalities:['text','image']}
  }
  async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
   const p=options.provider==='deepseek-web'?'deepseek':options.provider==='chatgpt-web'?'chatgpt':options.provider==='qwen-web'?'qwen':null
