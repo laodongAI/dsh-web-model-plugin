@@ -6,7 +6,7 @@ export interface WebPageHealthResult{status:WebPageHealth;message?:string;state:
 
 export abstract class WebPageAdapter{
  constructor(protected readonly cdp:CdpClient){}
- abstract isLoggedIn():Promise<boolean>
+ abstract canChat():Promise<boolean>
  abstract getConversationState():Promise<WebConversationState>
  abstract sendMessage(text:string):Promise<void>
  abstract readAnswer(previous:string):Promise<string>
@@ -49,7 +49,7 @@ export abstract class WebPageAdapter{
   const state=await this.getConversationState()
   if(!state.url.includes(this.expectedHost()))return {status:'page_changed',message:'当前浏览器页面不是目标模型页面',state}
   if(!state.ready)return {status:'page_changed',message:'目标页面输入区尚未就绪，页面结构可能已变化',state}
-  if(!await this.isLoggedIn())return {status:'login_required',message:'网页账号登录状态已失效或尚未登录',state}
+  if(!await this.canChat())return {status:'login_required',message:'网页账号登录状态已失效或尚未登录',state}
   const error=await this.detectError()
   if(error)return {status:error.code==='LOGIN_REQUIRED'?'login_required':'service_error',message:error.message,state}
   return {status:'ready',state}
