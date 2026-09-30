@@ -1,208 +1,114 @@
 # dsh-account-models
 
-面向 **DSH 0.2.0-rc.2** 的浏览器账号模型插件。
+面向 DSH 0.2.0-rc.2 的 Web AI 浏览器会话模型插件。
 
-## 当前实现
+## 目标
+在 DSH 中提供一个统一的 Web AI 模型入口。用户在 Web AI 设置中选择 Provider 并配置浏览器账号，普通 DSH 对话通过可见 Chromium 浏览器调用对应网站模型。
 
-- DeepSeek / ChatGPT / Qwen 账号记录
-- 每个账号独立 Chromium Profile
-- 可见 Chrome/Chromium 登录窗口
-- 登录状态由浏览器 Profile 持久化
-- DSH WebServer 管理接口
-- 不保存密码、Cookie、Token
-- 不调用 DeepSeek/ChatGPT/Qwen 私有 HTTP API
+支持：DeepSeek、ChatGPT、Qwen、腾讯混元 AI Studio、豆包、Perplexity、Microsoft Copilot、HuggingChat、Kimi、智谱 AI。
+
+## 设计原则
+- 使用用户可见的 Chrome/Chromium。
+- 每个 Web AI 账号使用独立、持久化 Chromium Profile。
+- 使用 CDP + DOM 完成页面发现、输入、回答读取、附件上传和停止生成。
+- 不读取或保存密码、Cookie、Access Token、Refresh Token。
+- 不调用目标网站私有 HTTP API，不做 HTTP 重放。
+- CAPTCHA、二次验证等人工验证由用户在浏览器中完成。
+- DSH 侧只注册一个 web-ai LLM Provider；具体 Provider 和账号由默认 Web AI 配置动态决定。
+
+## DSH 集成
+- 使用 ctx.llm.registerAdapter 注册统一 web-ai Provider。
+- 使用 ctx.webServer.register 注册插件 HTTP 路由。
+- 使用 Schemastery Config。
+- 使用 AttachmentStore 处理图片和文件附件。
+- LLM 流式输出遵循 DSH LlmAdapter / StreamChunk 协议。
+
+## Client
+- Settings：Web AI 设置页。
+- Right Sidebar：Web AI 浏览器 Live View。
+- Client bundle：dsh.client + exports./client + lazy-CJS。
+- Live View 当前显示真实 Chromium 会话的 CDP 截图，约每 1.5 秒刷新。
+
+## Web AI 模型
+模型选择器使用稳定模型 ID：web-ai:default。
+
+发送请求链路：
+DSH → web-ai → defaultAccountId → AccountProvider → 独立 Chromium Profile → Web AI 页面 → DOM/CDP → StreamChunk → DSH。
+
+因此切换 Provider 时不需要更换 DSH 模型类型。
 
 ## 数据目录
+~/.dsh/account-models/
 
-`~/.dsh/account-models/`
+其中 accounts.json 保存账号元数据，config.json 保存默认 Provider / Account；真正的网页登录状态由 Chromium Profile 持久化。
 
-```
-accounts.json
-deepseek/<account-id>/profile/
-chatgpt/<account-id>/profile/\nqwen/<account-id>/profile/
-```
+## Settings
+支持选择 Provider、添加并打开浏览器账号、人工登录、检查登录状态、选择默认账号、保存默认 Web AI、打开 Sidebar Live View、删除账号。
 
-## Chrome
+首次真正发送模型请求时，如果默认账号浏览器尚未启动，插件会自动启动该账号的 Chromium。
 
-插件自动查找常见 Chrome/Chromium 路径；也可以设置：
-
-```
-DSH_CHROME_PATH=C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe
-```
-
-## HTTP 接口
-
-```
+## HTTP Routes
 GET  /api/dsh-account-models/accounts
+GET  /api/dsh-account-models/browser/view?accountId=...
+GET  /api/dsh-account-models/config
+POST /api/dsh-account-models/config
 POST /api/dsh-account-models/accounts/add
-POST /api/dsh-account-models/accounts/:id/open
-POST /api/dsh-account-models/accounts/:id/check\nPOST /api/dsh-account-models/accounts/:id/close
-DELETE /api/dsh-account-models/accounts/:id/account
-```
+POST /api/dsh-account-models/accounts/open
+POST /api/dsh-account-models/accounts/check
+POST /api/dsh-account-models/accounts/close
+POST /api/dsh-account-models/accounts/remove
 
-## 安装与部署（DSH 0.2.0-rc.2 Desktop）
+## 构建
+要求 Node.js >= 22、pnpm 或 npm，以及 Chrome/Chromium。
 
-### 1. 构建环境
+pnpm install
+pnpm typecheck
+pnpm build
 
-- DSH 目标版本：0.2.0-rc.2
-- Node.js >= 22
-- npm
-- 本机 Chrome/Chromium
-
-Chrome 可执行文件也可以通过环境变量指定：
-
-    DSH_CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
-
-### 2. 从源码构建
-
-    git clone https://github.com/laodongAI/dsh-web-model-plugin.git
-    cd dsh-web-model-plugin
-    npm install
-    npm run typecheck
-    npm run build
-
-构建产物位于 lib/。
-
-### 3. 打包插件
-
-Linux/macOS：
-
-    rm -rf lib *.tgz
-    npm install
-    npm run typecheck
-    npm run build
-    npm pack
-
+## 打包
 Windows PowerShell：
+Remove-Item -Recurse -Force lib -ErrorAction SilentlyContinue
+Remove-Item -Force packed\* -ErrorAction SilentlyContinue
+pnpm install
+pnpm typecheck
+pnpm build
+pnpm pack --pack-destination .\packed
 
-    Remove-Item -Recurse -Force lib -ErrorAction SilentlyContinue
-    Remove-Item *.tgz -ErrorAction SilentlyContinue
-    npm install
-    npm run typecheck
-    npm run build
-    npm pack
+当前版本：dsh-account-models-0.1.2.tgz
 
-最终得到：
+建议每次生成新的 tgz 后再安装，避免 DSH 插件管理器继续使用旧缓存包。
 
-    dsh-account-models-0.1.0.tgz
+## DSH Desktop 安装
+完全退出 DSH Desktop 后执行：
+dsh.cmd plugin --profile desktop add .\packed\dsh-account-models-0.1.2.tgz
 
-建议先执行 npm pack --dry-run，确认包内没有 src、浏览器 Profile 或账号数据。
+如之前安装过旧版本：
+dsh.cmd plugin --profile desktop remove dsh-account-models
 
-### 4. 安装到 DSH 0.2.0-rc.2 Desktop
+安装完成后重新启动 DSH Desktop。
 
-这里不是安装 Electron Desktop 本体，而是把插件安装到 Desktop 的 desktop profile。
+## 验收路径
+1. DSH 启动日志不再出现 dsh-account-models: import failed。
+2. Settings 出现 Web AI。
+3. 添加 Provider 账号并打开可见浏览器。
+4. 手工完成网页登录并检查登录状态。
+5. 保存默认 Provider / Account。
+6. DSH 模型选择器出现一个统一的 Web AI（浏览器）。
+7. 普通 DSH 对话能够通过网页模型增量返回。
+8. 同一 DSH Session 保持对应网页 Conversation。
+9. Stop 能停止网页生成。
+10. 手工切换网页 Conversation 后应返回 PAGE_CHANGED。
+11. Right Sidebar 的 Web AI 浏览器能够显示真实 Chromium 页面。
 
-第一次安装前：
+## 当前边界
+Right Sidebar 当前采用 CDP 截图 Live View，而不是直接把插件自有 Chromium 页面嵌入 DSH Electron WebView。
 
-1. 启动一次 DSH Desktop，让 desktop profile 完成初始化。
-2. 完全退出 DSH Desktop。
-3. 使用 Desktop 随附的 dsh CLI 安装插件。
-4. 安装完成后重新打开 DSH Desktop。
+DSH 官方 ui-sidebar-browser 用于 Sidebar 中的 sandboxed HTTP(S) 页面；插件自己的持久 Chromium 会话目前没有公开的 CDP 页面嵌入 seam。因此当前实现优先保证真实浏览器登录态、独立 Profile、多 Provider、LLM 调用链路、DOM/CDP 交互和 Sidebar 观察能力。
 
-Windows：
+后续如果 DSH 暴露稳定的 BrowserView/CDP attach 能力，再升级为原生交互 BrowserView。
 
-    dsh.cmd plugin --profile desktop add .\dsh-account-models-0.1.0.tgz
+## 安全边界
+本插件不保存密码、不提取 Cookie/Token、不调用目标站点私有 API、不重放浏览器 HTTP 请求、不绕过 CAPTCHA 或二次验证。
 
-macOS/Linux：
-
-    dsh plugin --profile desktop add ./dsh-account-models-0.1.0.tgz
-
-检查：
-
-    dsh plugin --profile desktop list
-
-卸载：
-
-    dsh plugin --profile desktop remove dsh-account-models
-
-重要：Desktop 插件包管理由 Desktop shell 负责。执行安装、升级、删除之前，应先完全退出 Desktop；操作完成后重新启动 Desktop。
-
-### 5. 开发调试安装
-
-开发期间可以直接安装当前目录：
-
-    dsh plugin --profile desktop add .
-
-正式验收建议使用 npm pack 产生的 tgz，因为这样才能验证真实发布包内容。
-
-### 6. 安装后验收
-
-重新打开 Desktop 后：
-
-1. 确认 dsh-account-models 已加载。
-2. 添加 DeepSeek、ChatGPT 或 Qwen 账号。
-3. 检查可见 Chromium 是否启动。
-4. 手工完成网页登录。
-5. 检查账号状态变为 ready。
-6. 在 DSH 原生模型选择器确认对应 Web 模型账号出现。
-7. 发起普通 DSH 对话。
-8. 验证网页回答可以增量流式返回。
-9. 验证多轮 DSH Session 映射到同一个 Web Conversation。
-10. 点击 Stop，确认浏览器生成停止。
-11. 手工切换网页 Conversation，确认 DSH 返回 PAGE_CHANGED，而不是串到其他会话。
-12. 登出网页账号，确认得到登录错误。
-13. 验证额度、限流和页面结构变化错误。
-
-## 数据目录
-
-    ~/.dsh/account-models/
-    ├── accounts.json
-    ├── deepseek/<account-id>/profile/
-    └── chatgpt/<account-id>/profile/
-
-浏览器 Profile 由 Chromium 保存登录会话。插件元数据不保存密码、Cookie、Access Token 或 Refresh Token。
-
-## Chrome / Chromium
-
-插件自动查找常见 Chrome/Chromium 路径；也可以设置：
-
-    DSH_CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
-
-## HTTP 接口
-
-    GET    /api/dsh-account-models/accounts
-    POST   /api/dsh-account-models/accounts/add
-    POST   /api/dsh-account-models/accounts/:id/open
-    POST   /api/dsh-account-models/accounts/:id/check
-    POST   /api/dsh-account-models/accounts/:id/close
-    DELETE /api/dsh-account-models/accounts/:id/account
-
-## 浏览器原则
-
-账号登录完全通过用户可见的 Chromium 页面完成。出现 CAPTCHA、二次验证或其他人工验证时，插件不会尝试绕过，而是等待用户完成验证。
-
-插件不调用 DeepSeek / ChatGPT / Qwen 私有 HTTP API；模型交互通过用户可见浏览器页面的 DOM/CDP 完成。
-
-## CI 构建
-
-仓库包含 .github/workflows/build.yml。
-
-CI 使用 Node 22 执行：
-
-    npm install
-    npm run typecheck
-    npm run build
-
-## 当前状态
-
-本项目针对 DSH 0.2.0-rc.2 开发。rc.2 的 LlmAdapter、GenerateOptions、LlmError、StreamChunk 和 WebServer 注册方式已经完成源码契约核对。
-
-当前开发环境无法可靠访问 npm registry，因此没有把本地未实际执行的 npm install / npm run build 结果宣称为通过；GitHub Actions 会继续承担构建验证。
-
-## License
-
-MIT
-
-
-## 当前 Web Provider
-
-除 DeepSeek、ChatGPT、Qwen 外，当前插件已扩展以下浏览器账号模型：
-
-- 腾讯混元 AI Studio：`tencent-yuanbao-web`（入口为用户指定的 `aistudio.tencent.com`）
-- 豆包：`doubao-web`
-- Perplexity：`perplexity-web`
-- Microsoft Copilot：`copilot-web`
-- HuggingChat：`huggingchat-web`
-- Kimi：`kimi-web`
-
-以上均遵循浏览器会话模式：用户在持久化 Chromium Profile 中自行登录，插件通过 CDP/DOM 操作可见网页，不调用这些产品的私有 HTTP API。当前统一支持 DSH 文本消息和附件上传桥；每个平台的 DOM 选择器仍需要在实际登录页面逐一验收。
+当前版本：0.1.2
+目标：DSH 0.2.0-rc.2
