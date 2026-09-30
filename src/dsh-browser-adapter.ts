@@ -38,8 +38,12 @@ export class DshBrowserAdapter extends LlmAdapter{
   const accountId=accountIdOf(options.model)
   const account=accountId?this.accounts.list().find(a=>a.id===accountId):this.accounts.getDefaultAccount()
   if(!account)throw new LlmError('尚未配置默认 Web AI 浏览器账号，请先打开 Web AI 设置完成配置','MODEL_UNAVAILABLE')
-  const adapter=this.accounts.getProvider(account.id)
-  if(!adapter)throw new LlmError('账号浏览器尚未启动，请先打开账号','LOGIN_REQUIRED')
+  let adapter=this.accounts.getProvider(account.id)
+  if(!adapter){
+   await this.accounts.open(account.id)
+   adapter=this.accounts.getProvider(account.id)
+  }
+  if(!adapter)throw new LlmError('账号浏览器启动失败，请在 Web AI 设置中检查账号','SERVICE_UNAVAILABLE')
 
   const messages=options.messages.map(m=>({
    role:m.role,
