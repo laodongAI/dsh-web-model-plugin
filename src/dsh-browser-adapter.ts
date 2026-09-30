@@ -1,5 +1,4 @@
 import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResolvedModelInfo,type StreamChunk,type ToolCallId} from '@deepseek-ai/dsh-llm'
-import {brandString} from '@deepseek-ai/dsh-brand'
 import type {AccountManager} from './account-manager.js'
 import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
 
@@ -14,7 +13,7 @@ function extractToolCalls(text:string){
    const value=JSON.parse(match[1]) as {name?:unknown;arguments?:unknown;id?:unknown}
    if(typeof value.name!=='string'||!value.name.trim())continue
    const args=typeof value.arguments==='string'?value.arguments:JSON.stringify(value.arguments??{})
-   calls.push({id:brandString<ToolCallId>(typeof value.id==='string'&&value.id?value.id:`web-${calls.length+1}`),name:value.name.trim(),arguments:args})
+   calls.push({id:(typeof value.id==='string'&&value.id?value.id:`web-${calls.length+1}`) as ToolCallId,name:value.name.trim(),arguments:args})
   }catch{}
  }
  return calls
