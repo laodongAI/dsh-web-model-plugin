@@ -24,16 +24,9 @@ async function processBridgeRequest(){
   if(!response.ok)return
   const request=await response.json()
   if(!request.id||!request.provider||!request.expression)return
-  const frames=[...document.querySelectorAll('webview[data-sidebar-browser-frame]')]
-  const candidates=frames.filter(frame=>{
-   try{
-    const url=frame.getURL?.()||''
-    return typeof url==='string' && providerHost(request.provider,url)
-   }catch{return false}
-  })
-  const frame=candidates.at(-1)
+  const frame=await waitForProviderFrame(request.provider,12000)
   if(!frame){
-   await bridgeResult(request.id,false,undefined,'PAGE_CHANGED: DSH 右侧 Browser 中没有找到当前 Provider 页面')
+   await bridgeResult(request.id,false,undefined,'PAGE_CHANGED: DSH 右侧 Browser 在限定时间内没有建立当前 Provider 页面')
    return
   }
   try{
@@ -43,6 +36,23 @@ async function processBridgeRequest(){
    await bridgeResult(request.id,false,undefined,String(error?.message||error))
   }
  }catch{}
+}
+
+async function waitForProviderFrame(provider,timeoutMs){
+ const deadline=Date.now()+timeoutMs
+ while(Date.now()<deadline){
+  const frames=[...document.querySelectorAll('webview[data-sidebar-browser-frame]')]
+  const candidates=frames.filter(frame=>{
+   try{
+    const url=frame.getURL?.()||''
+    return typeof url==='string' && providerHost(provider,url)
+   }catch{return false}
+  })
+  const frame=candidates.at(-1)
+  if(frame)return frame
+  await new Promise(resolve=>setTimeout(resolve,150))
+ }
+ return undefined
 }
 
 async function bridgeResult(id,ok,value,error){
