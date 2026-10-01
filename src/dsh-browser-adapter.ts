@@ -70,6 +70,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   }
   if(!adapter)throw new LlmError('账号浏览器启动失败，请检查对应 Provider 的浏览器会话','SERVICE_UNAVAILABLE')
 
+  this.validateOptions(options)
   const sessionId=options.sessionId?String(options.sessionId):account.id
   const toolSchemas=options.tools??[]
   const browserAttachments=this.collectAttachments(options.messages)
@@ -124,6 +125,21 @@ export class DshBrowserAdapter extends LlmAdapter{
   }
  }
 
+ private validateOptions(options:GenerateOptions){
+  if(options.reasoningEffort){
+   throw new LlmError('Web AI 浏览器模式当前不能可靠控制 reasoningEffort，请在模型原生网页中使用默认推理设置','UNSUPPORTED_OPTION')
+  }
+  if(options.temperature!==undefined){
+   throw new LlmError('Web AI 浏览器模式当前不能可靠控制 temperature；请使用 Provider 网页自身的生成设置','UNSUPPORTED_OPTION')
+  }
+  if(options.maxTokens!==undefined){
+   throw new LlmError('Web AI 浏览器模式当前不能可靠控制 maxTokens；请使用 Provider 网页自身的生成设置','UNSUPPORTED_OPTION')
+  }
+  if(options.stop?.length){
+   throw new LlmError('Web AI 浏览器模式当前不能可靠控制 stop 序列','UNSUPPORTED_OPTION')
+  }
+ }
+
  private buildBrowserPrompt(
   options:GenerateOptions,
   firstTurn:boolean,
@@ -159,9 +175,11 @@ export class DshBrowserAdapter extends LlmAdapter{
    const content=this.renderMessageContent(message)
    return `[${message.role}]\n${content}`
   }).join('\n\n')
+  const system=options.system?.trim()
   return [
    '你现在是 DSH Agent 使用的 Web AI 模型。DSH 主机负责工作区、文件、命令和工具执行；你只负责理解任务、推理并返回下一步结果。',
    '下面是本次 DSH 请求的完整已组装上下文。请把它视为一次真实 LLM 请求的 messages，不要要求用户重新提供这些上下文。',
+   system?'<dsh_system>\n'+system+'\n</dsh_system>':'',
    toolInstruction,
    '<dsh_messages>',
    history,
