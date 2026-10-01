@@ -49,3 +49,58 @@ export async function connectTab(tab:CdpTab):Promise<CdpClient>{
 }
 function httpGet(port:number,path:string):Promise<string>{return new Promise((resolve,reject)=>{const req=request({host:'127.0.0.1',port,path},res=>{const a:Buffer[]=[];res.on('data',c=>a.push(Buffer.from(c)));res.on('end',()=>res.statusCode===200?resolve(Buffer.concat(a).toString('utf8')):reject(new Error('CDP HTTP '+res.statusCode)))});req.on('error',reject);req.end()})}
 function waitOpen(ws:WebSocket){return new Promise<void>((resolve,reject)=>{ws.addEventListener('open',()=>resolve(),{once:true});ws.addEventListener('error',()=>reject(new Error('无法连接 Chromium CDP')),{once:true})})}
+
+
+import {randomUUID} from 'node:crypto'
+import type {AccountProvider} from '../types.js'
+import {PROVIDER_MAP} from '../provider-catalog.js'
+
+type BridgePending={id:string;provider:AccountProvider;expression:string;createdAt:number;claimed:boolean;resolve:(value:unknown)=>void;reject:(error:Error)=>void}
+export interface BrowserBridgeRequest{id:string;provider:AccountProvider;expression:string}
+
+/** 将现有 CdpClient API 转接到 DSH 右侧原生 Electron <webview>。 */
+export class WebviewBrowserBridge {
+ private pending=new Map<string,BridgePending>()
+ private readonly timeoutMs=30000
+
+ async evaluate<T>(provider:AccountProvider,expression:string):Promise<T>{
+  const id=randomUUID()
+  return new Promise<T>((resolve,reject)=>{
+   this.pending.set(id,{id,provider,expression,createdAt:Date.now(),claimed:false,resolve:resolve as (value:unknown)=>void,reject})
+   setTimeout(()=>this.expire(id),this.timeoutMs)
+  })
+ }
+
+ next():BrowserBridgeRequest|undefined{
+  this.expireAll()
+  const item=[...this.pending.values()].find(x=>!x.claimed)
+  if(!item)return undefined
+  item.claimed=true
+  return {id:item.id,provider:item.provider,expression:item.expression}
+ }
+
+ resolve(id:string,value:unknown){const item=this.pending.get(id);if(!item)return;this.pending.delete(id);item.resolve(value)}
+ reject(id:string,message:string){const item=this.pending.get(id);if(!item)return;this.pending.delete(id);item.reject(new Error(message))}
+
+ connect(provider:AccountProvider):CdpClient{
+  return {
+   evaluate:<T>(expression:string)=>this.evaluate<T>(provider,expression),
+   async setFileInputFiles(){throw new Error('当前 DSH 原生 Browser Bridge 暂不支持文件上传，请使用右侧浏览器手工上传')},
+   async screenshot(){throw new Error('当前 DSH 原生 Browser Bridge 暂不支持截图')},
+   async close(){},
+  }
+ }
+
+ providerHost(provider:AccountProvider){return PROVIDER_MAP[provider].hostPattern.source}
+
+ dispose(){for(const item of this.pending.values())item.reject(new Error('Browser Bridge 已关闭'));this.pending.clear()}
+
+ private expire(id:string){
+  const item=this.pending.get(id)
+  if(item&&Date.now()-item.createdAt>=this.timeoutMs){
+   this.pending.delete(id)
+   item.reject(new Error('SERVICE_UNAVAILABLE: DSH 右侧浏览器操作超时，请检查当前 Provider 页面'))
+  }
+ }
+ private expireAll(){for(const id of this.pending.keys())this.expire(id)}
+}
