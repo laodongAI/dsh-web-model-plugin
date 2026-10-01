@@ -2,12 +2,13 @@ import {IncomingMessage,ServerResponse} from 'node:http'
 import type {AccountManager} from './account-manager.js'
 import type {AccountProvider} from './types.js'
 import {PROVIDER_MAP} from './provider-catalog.js'
+import type {WebviewBrowserBridge} from './browser/webview-bridge.js'
 
 const SUPPORTED:readonly AccountProvider[]=['deepseek','chatgpt','qwen','tencent-yuanbao','doubao','perplexity','copilot','huggingchat','kimi','chatglm']
 
 type Route={kind:'exact'|'prefix';path:string;handler:(q:IncomingMessage,s:ServerResponse)=>void|Promise<void>}
 
-export function registerRoutes(m:AccountManager,register:(r:Route)=>()=>void){
+export function registerRoutes(m:AccountManager,bridge:WebviewBrowserBridge,register:(r:Route)=>()=>void){
  const routes:Route[]=[
   {kind:'exact',path:'/api/dsh-account-models/accounts',handler:async(q,s)=>{if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405);return json(s,m.list())}},
   {kind:'exact',path:'/api/dsh-account-models/active-provider',handler:async(q,s)=>{
@@ -16,6 +17,21 @@ export function registerRoutes(m:AccountManager,register:(r:Route)=>()=>void){
    if(!provider)return json(s,{provider:null})
    const account=m.findByProvider(provider)
    return json(s,{provider,name:PROVIDER_MAP[provider].name,url:PROVIDER_MAP[provider].url,status:account?.status??'not_initialized',accountId:account?.id??null})
+  }},
+  {kind:'exact',path:'/api/dsh-account-models/browser/bridge/next',handler:async(q,s)=>{
+   if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405)
+   const request=bridge.next()
+   return json(s,request??{id:null})
+  }},
+  {kind:'exact',path:'/api/dsh-account-models/browser/bridge/result',handler:async(q,s)=>{
+   if(q.method!=='POST')return json(s,{error:'Method Not Allowed'},405)
+   try{
+    const b=await body(q) as {id?:string;ok?:boolean;value?:unknown;error?:string}
+    if(!b.id)return json(s,{error:'id 必填'},400)
+    if(b.ok)bridge.resolve(b.id,b.value)
+    else bridge.reject(b.id,b.error??'DSH Browser evaluate failed')
+    return json(s,{ok:true})
+   }catch(error){return json(s,{error:error instanceof Error?error.message:String(error)},400)}
   }},
   {kind:'exact',path:'/api/dsh-account-models/browser/view',handler:async(q,s)=>{
    if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405)
