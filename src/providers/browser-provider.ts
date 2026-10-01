@@ -1,4 +1,3 @@
-import {connectTab,listTabs} from '../browser/cdp-client.js'
 import {BrowserConversationManager} from '../browser/conversation-manager.js'
 import {PROVIDER_MAP} from '../provider-catalog.js'
 import type {AccountProvider} from '../types.js'
@@ -16,7 +15,7 @@ import {KimiPage} from './kimi/kimi-page.js'
 import {ChatGlmPage} from './chatglm/chatglm-page.js'
 
 export class DefaultBrowserProvider implements BrowserProvider {
- constructor(public readonly provider:AccountProvider,private readonly port:number,private readonly conversations=new BrowserConversationManager(),private readonly timing:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){}
+ constructor(public readonly provider:AccountProvider,private readonly cdp:import('../browser/cdp-client.js').CdpClient,private readonly conversations=new BrowserConversationManager(),private readonly timing:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){}
 
  private createPage(cdp:import('../browser/cdp-client.js').CdpClient){
   const pages={deepseek:DeepSeekPage,chatgpt:ChatGptPage,qwen:QwenPage,'tencent-yuanbao':TencentYuanbaoPage,doubao:DoubaoPage,perplexity:PerplexityPage,copilot:CopilotPage,huggingchat:HuggingChatPage,kimi:KimiPage,chatglm:ChatGlmPage} as const
@@ -25,24 +24,19 @@ export class DefaultBrowserProvider implements BrowserProvider {
  }
 
  private async page(sessionId:string,accountId:string){
-  const tab=await this.conversations.findTab(this.port,sessionId,accountId,this.provider)
-  if(!tab)throw new Error('PAGE_CHANGED: 没有找到可绑定的浏览器页面，请先打开账号窗口')
-  const cdp=await connectTab(tab)
-  const page=this.createPage(cdp)
+  const page=this.createPage(this.cdp)
   const health=await page.health()
   if(health.status!=='ready'&&health.status!=='login_required'){
-   await cdp.close()
    throw new Error('PAGE_CHANGED: '+(health.message??'网页页面不可用'))
   }
   const state=health.state
   const oldBinding=this.conversations.get(sessionId)
   if(oldBinding?.conversationId&&state.conversationId&&oldBinding.conversationId!==state.conversationId){
    this.conversations.markDesynced(sessionId)
-   await cdp.close()
    throw new Error('PAGE_CHANGED: 当前网页已切换到其他会话')
   }
   this.conversations.bind(sessionId,accountId,tab,state.conversationId)
-  return {cdp,page}
+  return {cdp:this.cdp,page}
  }
 
  async listModels():Promise<readonly BrowserProviderModel[]>{
@@ -51,30 +45,19 @@ export class DefaultBrowserProvider implements BrowserProvider {
  }
 
  async screenshot(){
-  const tabs=await listTabs(this.port)
-  const tab=tabs.find(x=>PROVIDER_MAP[this.provider].hostPattern.test(x.url))
-  if(!tab)throw new Error('没有找到当前 Provider 的浏览器页面')
-  const cdp=await connectTab(tab)
-  try{return {...await cdp.screenshot(),url:tab.url,title:tab.title}}
-  finally{await cdp.close()}
+  const state=await this.cdp.evaluate<{url:string;title:string}>(`(()=>({url:location.href,title:document.title}))()`)
+  return {...await this.cdp.screenshot(),url:state.url,title:state.title}
  }
 
  async checkReady(){
-  const tabs=await listTabs(this.port)
-  const tab=tabs.find(x=>PROVIDER_MAP[this.provider].hostPattern.test(x.url))
-  if(!tab)return false
-  const cdp=await connectTab(tab)
-  try{return await this.createPage(cdp).canChat()}
-  finally{await cdp.close()}
+  try{return await this.createPage(this.cdp).canChat()}catch{return false}
  }
 
  async *chat(req:BrowserChatRequest){
   const sessionId=req.sessionId??req.accountId
   this.conversations.begin(req.accountId,sessionId)
-  let cdp:import('../browser/cdp-client.js').CdpClient|undefined
   try{
    const result=await this.page(sessionId,req.accountId)
-   cdp=result.cdp
    const {page}=result
    const last=req.messages.filter(m=>m.role==='user').at(-1)?.content??''
    if(!last&&!req.attachments?.length)throw new Error('没有可发送的用户消息')
@@ -88,7 +71,6 @@ export class DefaultBrowserProvider implements BrowserProvider {
    await page.sendMessage(last)
    for await(const delta of page.streamAnswer(req.signal))yield delta
   }finally{
-   if(cdp)await cdp.close()
    this.conversations.end(req.accountId,sessionId)
   }
  }
