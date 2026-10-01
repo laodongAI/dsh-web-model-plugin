@@ -76,7 +76,7 @@ function apply(ctx){
    }
   }catch{}
  }
- await poll()
+ poll()
  timer=setInterval(poll,POLL_MS)
  bridgeTimer=setInterval(processBridgeRequest,BRIDGE_POLL_MS)
  ctx.effect(()=>()=>{clearInterval(timer);clearInterval(bridgeTimer)},'dsh-account-models: provider browser sync')
