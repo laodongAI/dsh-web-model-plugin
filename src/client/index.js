@@ -30,6 +30,7 @@ function apply(ctx){
  }
  await poll()
  timer=setInterval(poll,POLL_MS)
+ ctx.effect(()=>()=>clearInterval(timer),'dsh-account-models: provider browser sync')
 }
 apply.lastKey=''
 module.exports={apply}
