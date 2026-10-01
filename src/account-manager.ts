@@ -83,7 +83,7 @@ export class AccountManager {
   this.selectProvider(provider)
   const existing=this.findByProvider(provider)
   if(existing){
-   if(!this.browser.isRunning(existing.id))await this.open(existing.id)
+   if(!this.providers.has(existing.id))await this.open(existing.id)
    return this.snapshot(existing.id)!
   }
   return this.add(provider)
@@ -92,7 +92,7 @@ export class AccountManager {
 
  async screenshot(id:string){
   const a=this.require(id)
-  if(!a.status!=='browser_closed')await this.open(id)
+  if(!this.providers.has(id))await this.open(id)
   const p=this.providers.get(id)
   if(!p)throw new Error('Provider 未初始化')
   return p.screenshot()
@@ -100,10 +100,10 @@ export class AccountManager {
 
  snapshot(id:string){
   const a=this.store.get(id)
-  return a?{...a,browserRunning:this.browser.isRunning(id)}:undefined
+  return a?{...a,browserRunning:a.status!=='browser_closed'}:undefined
  }
 
- async dispose(){await this.browser.closeAll()}
+ async dispose(){this.providers.clear()}
 
  private require(id:string){
   const a=this.store.get(id)
