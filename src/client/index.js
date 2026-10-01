@@ -8,7 +8,7 @@ const BRIDGE_WAIT_MS=12000
 let bridgeTimer
 let modelDirectories
 let currentProviderBySession=new Map()
-let reconcilePromiseBySession=new Map()
+let reconcilePromiseBySession=new Map()\nlet openingProviderBySession=new Map()
 let unsubscribeSelection=()=>{}
 let unsubscribeMounted=()=>{}
 let unsubscribeAgentStatus=()=>{}
