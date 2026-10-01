@@ -24,18 +24,18 @@
 - LLM 流式输出遵循 DSH LlmAdapter / StreamChunk 协议。
 
 ## Client
-- Settings：Web AI 设置页。
-- Right Sidebar：Web AI 浏览器 Live View。
-- Client bundle：dsh.client + exports./client + lazy-CJS。
-- Live View 当前显示真实 Chromium 会话的 CDP 截图，约每 1.5 秒刷新。
+- 不再提供插件 Settings 配置页。
+- Provider 直接出现在 DSH 中间模型选择器中，共 10 个 Web AI Provider。
+- Right Sidebar 使用 DSH 原生 Browser；官方 Browser 支持多实例/多 Tab，Provider 登录和人工调试优先在这里完成。
+- Client bundle 保留最小生命周期入口，避免再增加一套 Provider 配置 UI。
 
 ## Web AI 模型
 模型选择器使用稳定模型 ID：default（兼容旧版 web-ai:default）。
 
 发送请求链路：
-DSH Agent Loop → web-ai → defaultAccountId → AccountProvider → 独立 Chromium Profile → Web AI 页面 → DOM/CDP → StreamChunk → DSH Agent Loop。
+DSH Agent Loop → web-ai → 选中的 Web AI Provider model → AccountProvider → Chromium Profile/CDP → Web AI 页面 → StreamChunk → DSH Agent Loop。
 
-0.2.0 开始，Adapter 保留 DSH 的 tools 上下文；Web AI 如果按约定输出 `<dsh_tool_call>...</dsh_tool_call>`，插件会转换为 DSH 原生 `tool-call` 分片，由 DSH Agent Loop 继续执行本地工具并把 Tool Result 带回下一轮 Web AI。
+0.2.1 开始，模型选择器直接列出 10 个 Web AI Provider；不再通过插件 Settings 配置默认 Provider。选择某个 Provider 后，首次实际请求会自动建立/打开对应浏览器会话。Adapter 保留 DSH 的 tools 上下文；Web AI 如果按约定输出 `<dsh_tool_call>...</dsh_tool_call>`，插件会转换为 DSH 原生 `tool-call` 分片，由 DSH Agent Loop 继续执行本地工具并把 Tool Result 带回下一轮 Web AI。
 
 因此切换 Provider 时不需要更换 DSH 模型类型。
 
@@ -44,10 +44,12 @@ DSH Agent Loop → web-ai → defaultAccountId → AccountProvider → 独立 Ch
 
 其中 accounts.json 保存账号元数据，config.json 保存默认 Provider / Account；真正的网页登录状态由 Chromium Profile 持久化。
 
-## Settings
-支持选择 Provider、添加并打开浏览器账号、人工登录、检查登录状态、选择默认账号、保存默认 Web AI、打开 Sidebar Live View、删除账号。
+## Provider / Browser
+模型选择器直接显示 DeepSeek、ChatGPT、Qwen、腾讯混元 AI Studio、豆包、Perplexity、Microsoft Copilot、HuggingChat、Kimi、智谱 AI。
 
-首次真正发送模型请求时，如果默认账号浏览器尚未启动，插件会自动启动该账号的 Chromium。
+首次真正发送某个 Provider 的模型请求时，插件自动创建该 Provider 的浏览器账号记录并启动可见 Chromium；后续请求复用该 Provider 的持久 Profile。
+
+右侧 Sidebar 的原生 Browser 用于用户可见的登录、网页浏览和调试，并支持多 Tab。
 
 ## HTTP Routes
 GET  /api/dsh-account-models/accounts
@@ -76,13 +78,13 @@ pnpm typecheck
 pnpm build
 pnpm pack --pack-destination .\packed
 
-当前版本：dsh-account-models-0.2.0.tgz
+当前版本：dsh-account-models-0.2.1.tgz
 
 建议每次生成新的 tgz 后再安装，避免 DSH 插件管理器继续使用旧缓存包。
 
 ## DSH Desktop 安装
 完全退出 DSH Desktop 后执行：
-dsh.cmd plugin --profile desktop add .\packed\dsh-account-models-0.2.0.tgz
+dsh.cmd plugin --profile desktop add .\packed\dsh-account-models-0.2.1.tgz
 
 如之前安装过旧版本：
 dsh.cmd plugin --profile desktop remove dsh-account-models
@@ -113,5 +115,5 @@ DSH 官方 ui-sidebar-browser 用于 Sidebar 中的 sandboxed HTTP(S) 页面；�
 ## 安全边界
 本插件不保存密码、不提取 Cookie/Token、不调用目标站点私有 API、不重放浏览器 HTTP 请求、不绕过 CAPTCHA 或二次验证。
 
-当前版本：0.2.0
+当前版本：0.2.1
 目标：DSH 0.2.0-rc.2
