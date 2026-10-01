@@ -17,6 +17,8 @@ let unsubscribeAgentStatus=()=>{}
 let unsubscribeAssistantStream=()=>{}
 let lastOpenKey=''
 let lastOpenAt=0
+let openingKey=''
+let openingUntil=0
 
 // Cordis Client 服务依赖：apply() 内所有 sidebar/modelDirectory 访问都必须声明注入。
 // 否则 ctx.sidebarRight / modelDirectories 在运行时不可读，状态协调器会静默失效。
@@ -151,15 +153,18 @@ function browserState(ctx,sessionId,provider){
 
 function openProviderBrowser(ctx,provider){
  const key=provider.id+'|'+provider.url
- if(key===lastOpenKey&&Date.now()-lastOpenAt<2500)return false
+ const now=Date.now()
+ if(key===openingKey&&now<openingUntil)return false
+ if(key===lastOpenKey&&now-lastOpenAt<5000)return false
  try{
-  // Browser 是 multi-instance。使用 revealIfOpened:false，避免当前只是 guide/start
-  // 页时被同一个 browser kind 的地址去重规则拦住；这也是 DSH 原生 Browser
-  // 自己用于“新建 Browser tab”的正式方式。
-  ctx.sidebarRight.openTab('browser',{params:{url:provider.url},revealIfOpened:false})
+  // 使用 DSH 原生 openTab 的默认去重语义：同 kind + 同 address 时复用/聚焦已有 Tab。
+  // 不再设置 revealIfOpened:false，否则会主动绕过原生去重，造成重复 Browser Tab。
+  ctx.sidebarRight.openTab('browser',{params:{url:provider.url}})
+  openingKey=key
+  openingUntil=now+8000
   lastOpenKey=key
-  lastOpenAt=Date.now()
-  console.info('[dsh-account-models] browser action: open',provider.id,provider.url)
+  lastOpenAt=now
+  console.info('[dsh-account-models] browser action: open/reuse',provider.id,provider.url)
   return true
  }catch(error){
   console.warn('[dsh-account-models] browser action failed:',error)
@@ -202,7 +207,7 @@ async function reconcileBrowser(ctx,reason='poll'){
 
   // 状态 4：Browser Tab 已存在，但 WebView 尚未建立/尚未得到稳定 URL。
   // 这是 DSH Browser 的正常加载窗口，绝不能重复创建 Browser Tab。
-  if(browser.loading){
+  if(browser.loading|| (openingKey===provider.id+'|'+provider.url&&Date.now()<openingUntil)){
    console.info('[dsh-account-models] browser action: wait for native Browser load',provider.id)
    return
   }
@@ -216,6 +221,11 @@ async function reconcileBrowser(ctx,reason='poll'){
 
   // 状态 5：目标 Provider 页面存在。
   // 不强制导航；每次 Chat 的 Host adapter 会再次做 health() 校验。
+  if(browser.matching&&openingKey===provider.id+'|'+provider.url){
+   openingKey=''
+   openingUntil=0
+  }
+
   console.info('[dsh-account-models] browser action: matching provider page found',provider.id)
  }finally{
   reconcileBusy=false
