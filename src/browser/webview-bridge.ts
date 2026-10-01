@@ -16,7 +16,7 @@ interface Pending {
 
 export class WebviewBrowserBridge {
  private readonly pending=new Map<string,Pending>()
- private readonly timeoutMs=45000
+ private readonly timeoutMs=15000
 
  evaluate<T>(provider:AccountProvider,expression:string):Promise<T>{
   const id=randomUUID()
