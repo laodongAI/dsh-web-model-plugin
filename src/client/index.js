@@ -5,7 +5,7 @@ const PROVIDERS=[
 ]
 
 const RECONCILE_MS=500
-const BRIDGE_WAIT_MS=30000
+const BRIDGE_WAIT_MS=12000
 let bridgeTimer
 let reconcileTimer
 let reconcileBusy=false
@@ -41,7 +41,7 @@ async function processBridgeRequest(){
 async function waitForProviderFrame(provider,timeoutMs){
  const deadline=Date.now()+timeoutMs
  while(Date.now()<deadline){
-  const frames=[...document.querySelectorAll('webview[data-sidebar-browser-frame]')]
+  const frames=[...document.querySelectorAll('webview')].filter(frame=>{\n   try{return typeof frame.getURL==='function'}catch{return false}\n  })
   const candidates=frames.filter(frame=>{
    try{
     const url=frame.getURL?.()||''
@@ -118,7 +118,7 @@ function rightSidebarState(ctx){
 
 function browserState(ctx,sessionId,provider){
  const openTabs=(ctx.sidebarRight.openTabs?.getSnapshot?.()??[]).filter(tab=>tab.sessionId===sessionId&&tab.kind==='browser')
- const frames=[...document.querySelectorAll('webview[data-sidebar-browser-frame], iframe[data-sidebar-browser-frame]')]
+ const frames=[...document.querySelectorAll('webview, iframe')].filter(frame=>{\n  try{\n   if(typeof frame.getURL==='function')return true\n   return frame instanceof HTMLIFrameElement\n  }catch{return false}\n })
  const urls=frames.map(frame=>{
   try{
    if(typeof frame.getURL==='function')return frame.getURL()||''
