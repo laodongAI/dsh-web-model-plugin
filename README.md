@@ -3,7 +3,7 @@
 面向 DSH 0.2.0-rc.2 的 Web AI 浏览器会话模型插件。
 
 ## 目标
-在 DSH 中提供一个统一的 Web AI 模型入口。用户在 Web AI 设置中选择 Provider 并配置浏览器账号，普通 DSH 对话通过可见 Chromium 浏览器调用对应网站模型。
+在 DSH 中提供一个统一的 Web AI 模型入口。10 个 Provider 直接进入 DSH 中间模型选择器；普通 DSH 对话通过可见 Chromium 浏览器调用对应网站模型。
 
 支持：DeepSeek、ChatGPT、Qwen、腾讯混元 AI Studio、豆包、Perplexity、Microsoft Copilot、HuggingChat、Kimi、智谱 AI。
 
@@ -14,7 +14,7 @@
 - 不读取或保存密码、Cookie、Access Token、Refresh Token。
 - 不调用目标网站私有 HTTP API，不做 HTTP 重放。
 - CAPTCHA、二次验证等人工验证由用户在浏览器中完成。
-- DSH 侧只注册一个 web-ai LLM Provider；具体 Provider 和账号由默认 Web AI 配置动态决定。
+- DSH 侧只注册一个 `web-ai` LLM Provider；具体 Provider 由 `GenerateOptions.model` 选择，账号由 Host 按 Provider 自动管理。
 
 ## DSH 集成
 - 使用 ctx.llm.registerAdapter 注册统一 web-ai Provider。
@@ -30,7 +30,7 @@
 - Client bundle 保留最小生命周期入口，避免再增加一套 Provider 配置 UI。
 
 ## Web AI 模型
-模型选择器使用稳定模型 ID：default（兼容旧版 web-ai:default）。
+模型选择器使用 Provider 作为稳定模型 ID：`deepseek`、`chatgpt`、`qwen`、`tencent-yuanbao`、`doubao`、`perplexity`、`copilot`、`huggingchat`、`kimi`、`chatglm`；旧版 `default` / `web-ai:*` 仅保留兼容解析。
 
 发送请求链路：
 DSH Agent Loop → web-ai → 选中的 Web AI Provider model → AccountProvider → Chromium Profile/CDP → Web AI 页面 → StreamChunk → DSH Agent Loop。
@@ -42,7 +42,7 @@ DSH Agent Loop → web-ai → 选中的 Web AI Provider model → AccountProvide
 ## 数据目录
 ~/.dsh/account-models/
 
-其中 accounts.json 保存账号元数据，config.json 保存默认 Provider / Account；真正的网页登录状态由 Chromium Profile 持久化。
+其中 `accounts.json` 保存 Provider 浏览器账号元数据；`config.json` 仅保留旧版本默认账号配置用于兼容，不再作为新版本 Provider 选择入口；真正的网页登录状态由 Chromium Profile 持久化。
 
 ## Provider / Browser
 模型选择器直接显示 DeepSeek、ChatGPT、Qwen、腾讯混元 AI Studio、豆包、Perplexity、Microsoft Copilot、HuggingChat、Kimi、智谱 AI。
@@ -93,12 +93,11 @@ dsh.cmd plugin --profile desktop remove dsh-account-models
 
 ## 验收路径
 1. DSH 启动日志不再出现 dsh-account-models: import failed。
-2. Settings 出现 Web AI。
-3. 添加 Provider 账号并打开可见浏览器。
-4. 手工完成网页登录并检查登录状态。
-5. 保存默认 Provider / Account。
-6. DSH 模型选择器出现一个统一的 Web AI（浏览器）。
-7. 普通 DSH 对话能够通过网页模型完成请求，Web AI 长 Thinking 不再因默认 60 秒无首字超时提前失败。
+2. DSH 中间模型选择器直接出现 10 个 Web AI Provider。
+3. 选择任一 Provider 后，首次发送消息自动创建/打开该 Provider 的可见 Chromium 会话。
+4. 在浏览器中手工完成网页登录；后续请求复用该 Provider 的持久 Profile。
+5. 右侧 Sidebar 使用 DSH 原生 Browser 多 Tab 进行网页浏览和调试。
+6. 普通 DSH 对话能够通过网页模型完成请求，Web AI 长 Thinking 不再因默认 60 秒无首字超时提前失败。
 8. 同一 DSH Session 保持对应网页 Conversation。
 9. 当 DSH 提供 tools 时，Web AI 可以通过工具调用协议请求本地 Agent Tool，由 DSH 执行后继续下一轮模型推理。
 10. Stop 能停止网页生成。
@@ -106,11 +105,9 @@ dsh.cmd plugin --profile desktop remove dsh-account-models
 12. Right Sidebar 的 Web AI 浏览器能够显示真实 Chromium 页面。
 
 ## 当前边界
-Right Sidebar 当前采用 CDP 截图 Live View，而不是直接把插件自有 Chromium 页面嵌入 DSH Electron WebView。
+右侧 Sidebar 的原生 Browser 与插件 Host 启动的 CDP Chromium 当前是两个浏览器载体：Sidebar Browser 负责用户可见的网页浏览、登录和调试；Host Chromium 负责稳定的 CDP/DOM 自动化。DSH 官方 Browser Tab 支持多实例、多 Tab，但当前公开插件契约没有把该 Electron webview 的 CDP attach 能力暴露给 Host 插件，因此本版本不伪装成“同一个浏览器会话”。
 
-DSH 官方 ui-sidebar-browser 用于 Sidebar 中的 sandboxed HTTP(S) 页面；插件自己的持久 Chromium 会话目前没有公开的 CDP 页面嵌入 seam。因此当前实现优先保证真实浏览器登录态、独立 Profile、多 Provider、LLM 调用链路、DOM/CDP 交互和 Sidebar 观察能力。
-
-后续如果 DSH 暴露稳定的 BrowserView/CDP attach 能力，再升级为原生交互 BrowserView。
+下一阶段如果能获得稳定的 BrowserView/CDP attach seam，再把两者合并为真正的“右侧浏览器即自动化浏览器”。在此之前，Provider 选择、持久登录态、CDP 自动化和右侧多 Tab UI 各自职责清晰。
 
 ## 安全边界
 本插件不保存密码、不提取 Cookie/Token、不调用目标站点私有 API、不重放浏览器 HTTP 请求、不绕过 CAPTCHA 或二次验证。
