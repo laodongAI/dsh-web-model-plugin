@@ -68,7 +68,7 @@ export class DefaultBrowserProvider implements BrowserProvider {
    if(health.status!=='ready')throw new Error('PAGE_CHANGED: '+(health.message??'网页页面不可用'))
    if(req.attachments?.length){
     const paths=this.conversations.unuploaded(sessionId,req.attachments.map(x=>x.path))
-    if(paths.length){await page.uploadFiles(paths);this.conversations.markUploaded(sessionId,paths)}
+    if(paths.length){await page.uploadAttachments(paths);this.conversations.markUploaded(sessionId,paths)}
    }
    await page.sendMessage(last)
    for await(const delta of page.streamAnswer(req.signal))yield delta
