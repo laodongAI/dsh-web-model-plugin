@@ -1,10 +1,5 @@
-import {WebPageAdapter,type WebConversationState} from '../web-page.js'
-export class DoubaoPage extends WebPageAdapter{
- expectedHost(){return 'doubao.com'}
- async canChat(){return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector('textarea,[contenteditable="true"]'))()`)}
- async getConversationState():Promise<WebConversationState>{return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/(?:chat|conversation|bot\\/chat)\\/([\\w-]+)/)||[])[1],ready:!!document.querySelector('textarea,[contenteditable="true"]'),changed:false}))()`)}
- async sendMessage(text:string){await this.cdp.evaluate<void>(`(()=>{const e=document.querySelector('textarea,[contenteditable="true"]');if(!e)throw new Error('PAGE_CHANGED: 豆包输入框未找到');e.focus();if(e instanceof HTMLTextAreaElement){const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;s?.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}))}else{e.textContent=${JSON.stringify(text)};e.dispatchEvent(new InputEvent('input',{bubbles:true}))}const b=[...document.querySelectorAll('button')].find(x=>/发送|send|提交/i.test(x.textContent||'')&&!x.disabled);if(b)b.click();else e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}))})()`)}
- async readAnswer(previous:string){return this.cdp.evaluate<string>(`(()=>{const p=${JSON.stringify(previous)};const n=[...document.querySelectorAll('[class*="message"],[class*="markdown"],main article')].map(x=>(x.innerText||'').trim()).filter(x=>x&&x!==p);return n.at(-1)||''})()`)}
- async isGenerating(){return this.cdp.evaluate<boolean>(`(()=>[...document.querySelectorAll('button')].some(b=>/停止|stop|中止/i.test(b.textContent||'')))()`)}
+ async readAnswer(previous:string){return this.readLatest("[class*=\"message\"],[class*=\"markdown\"],main article",previous)}
+
+ async isGenerating(){return this.isBusy()}
  async detectError(){return this.cdp.evaluate<any>(`(()=>{const t=document.body?.innerText||'';if(/登录|手机号登录|登录后/i.test(t)&&!document.querySelector('textarea,[contenteditable="true"]'))return {code:'LOGIN_REQUIRED',message:'豆包需要登录'};if(/额度|频繁|rate limit|too many/i.test(t))return {code:'RATE_LIMITED',message:'豆包请求受到限制'};return null})()`)}
-}
+} async detectError(){return this.commonError("登录|sign in|log in")}}
