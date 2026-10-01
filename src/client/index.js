@@ -4,12 +4,14 @@ const PROVIDERS=[
  ['copilot','Microsoft Copilot','https://copilot.microsoft.com/'],['huggingchat','HuggingChat','https://huggingface.co/chat/'],['kimi','Kimi','https://kimi.moonshot.cn/'],['chatglm','智谱 AI','https://chatglm.cn/'],
 ]
 
-const BRIDGE_POLL_MS=120
+const RECONCILE_MS=250
+const PROBE_AFTER_OPEN_MS=1500
+const PROBE_RETRY_MS=3000
 let bridgeTimer
-
-// Provider 仍然只来自 DSH 中间模型选择器。
-// 这里唯一的 Client 行为是：Host 确认当前 Provider 后，把对应网页打开到 DSH 原生右侧 Browser。
-// 不增加左侧 Provider UI，也不维护第二套 Provider 配置。
+let reconcileTimer
+let probeTimer
+let reconcileBusy=false
+let desiredSelection
 
 async function processBridgeRequest(){
  try{
@@ -26,15 +28,25 @@ async function processBridgeRequest(){
   })
   const frame=candidates.at(-1)
   if(!frame){
-   await fetch('/api/dsh-account-models/browser/bridge/result',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:request.id,ok:false,error:'PAGE_CHANGED: DSH 右侧 Browser 中没有找到当前 Provider 页面'})})
+   await bridgeResult(request.id,false,undefined,'PAGE_CHANGED: DSH 右侧 Browser 中没有找到当前 Provider 页面')
    return
   }
   try{
    const value=await frame.executeJavaScript(request.expression,true)
-   await fetch('/api/dsh-account-models/browser/bridge/result',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:request.id,ok:true,value})})
+   await bridgeResult(request.id,true,value)
   }catch(error){
-   await fetch('/api/dsh-account-models/browser/bridge/result',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:request.id,ok:false,error:String(error?.message||error)})})
+   await bridgeResult(request.id,false,undefined,String(error?.message||error))
   }
+ }catch{}
+}
+
+async function bridgeResult(id,ok,value,error){
+ try{
+  await fetch('/api/dsh-account-models/browser/bridge/result',{
+   method:'POST',
+   headers:{'content-type':'application/json'},
+   body:JSON.stringify({id,ok,value,error})
+  })
  }catch{}
 }
 
@@ -56,10 +68,111 @@ function providerHost(provider,url){
  }catch{return false}
 }
 
+function selectedProvider(selection){
+ if(!selection||selection.provider!=='web-ai')return undefined
+ const item=PROVIDERS.find(([id])=>id===selection.model)
+ if(!item)return undefined
+ return {id:item[0],name:item[1],url:item[2]}
+}
+
+function rightSidebarState(sessionId){
+ const root=document.querySelector(`[data-sidebar-right-session="${cssEscape(sessionId)}"]`)
+ if(!root)return {mounted:false,expanded:false}
+ return {
+  mounted:true,
+  expanded:root.querySelector('[data-sidebar-right-panel][data-sidebar-right-open]')!==null
+ }
+}
+
+function browserState(sessionId,provider){
+ const scope=document.querySelector(`[data-sidebar-right-session="${cssEscape(sessionId)}"]:not([hidden])`)??document
+ const frames=[...scope.querySelectorAll('webview[data-sidebar-browser-frame], iframe[data-sidebar-browser-frame]')]
+ const urls=frames.map(frame=>{
+  try{
+   if(typeof frame.getURL==='function')return frame.getURL()||''
+   if(frame instanceof HTMLIFrameElement)return frame.src||''
+  }catch{}
+  return ''
+ })
+ return {
+  count:frames.length,
+  matching:urls.some(url=>providerHost(provider,url)),
+  urls
+ }
+}
+
+function openProviderBrowser(provider){
+ try{
+  ctx.sidebarRight.openTab('browser',{params:{url:provider.url}})
+  console.info('[dsh-account-models] browser action: open',provider.id,provider.url)
+  return true
+ }catch(error){
+  console.warn('[dsh-account-models] browser action failed:',error)
+  return false
+ }
+}
+
+function cssEscape(value){
+ return String(value).replace(/\\/g,'\\\\').replace(/"/g,'\\"')
+}
+
+async function reconcileBrowser(){
+ if(reconcileBusy||!desiredSelection)return
+ reconcileBusy=true
+ try{
+  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+  if(!sessionId)return
+
+  const provider=desiredSelection
+  const sidebar=rightSidebarState(sessionId)
+  const browser=browserState(sessionId,provider.id)
+
+  console.info('[dsh-account-models] state:',JSON.stringify({
+   provider:provider.id,
+   sidebar,
+   browser
+  }))
+
+  // 状态 1：右侧 Sidebar 未挂载/未展开。
+  // openTab 是 DSH 官方入口；它负责把 Browser tab 放入当前右侧工作区。
+  if(!sidebar.mounted||!sidebar.expanded){
+   openProviderBrowser(provider)
+   return
+  }
+
+  // 状态 2：右侧已经展开，但没有 Browser。
+  if(browser.count===0){
+   openProviderBrowser(provider)
+   return
+  }
+
+  // 状态 3：已有 Browser，但当前页面不是所选 Web AI Provider。
+  // 不抢用户原有 tab；新建一个目标 Provider tab，保留 DSH 的多 tab 能力。
+  if(!browser.matching){
+   openProviderBrowser(provider)
+   return
+  }
+
+  // 状态 4：目标 Provider 页面已经存在。
+  // 不重复打开、不强制导航；交给 Host adapter 进行页面健康/登录/会话检测。
+  console.info('[dsh-account-models] browser action: ready candidate',provider.id)
+ }finally{
+  reconcileBusy=false
+ }
+}
+
+function startProbe(){
+ clearTimeout(probeTimer)
+ probeTimer=setTimeout(()=>{
+  reconcileBrowser().catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+ },PROBE_AFTER_OPEN_MS)
+}
+
 function apply(ctx){
- console.info('[dsh-account-models] client active: native model selector + right browser workspace')
+ console.info('[dsh-account-models] client active: native model selector + browser state reconciler')
  let unsubscribeSelection=()=>{}
  let unsubscribeMounted=()=>{}
+
  const bindSelection=(modelDirectories)=>{
   unsubscribeSelection()
   unsubscribeSelection=()=>{}
@@ -69,19 +182,12 @@ function apply(ctx){
    const directory=modelDirectories.directoryFor(sessionId)
    const update=()=>{
     const selection=directory.store.getSnapshot().current
-    if(!selection||selection.provider!=='web-ai')return
-    const item=PROVIDERS.find(([id])=>id===selection.model)
-    if(!item)return
-    const [,providerName,url]=item
-    const key=selection.provider+'|'+selection.model+'|'+url
-    if(apply.lastKey===key)return
-    apply.lastKey=key
-    try{
-     ctx.sidebarRight.openTab('browser',{params:{url}})
-     console.info('[dsh-account-models] opened native Browser for selected provider:',providerName,url)
-    }catch(error){
-     console.warn('[dsh-account-models] DSH Browser tab unavailable:',error)
-    }
+    const next=selectedProvider(selection)
+    desiredSelection=next
+    if(!next)return
+    console.info('[dsh-account-models] selected Web AI provider:',next.id,next.url)
+    reconcileBrowser().catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+    startProbe()
    }
    unsubscribeSelection=directory.store.subscribe(update)
    update()
@@ -89,18 +195,31 @@ function apply(ctx){
    console.warn('[dsh-account-models] model selection sync unavailable:',error)
   }
  }
+
  ctx.inject(['modelDirectories'],(scope)=>{
   const modelDirectories=scope.modelDirectories
   const bind=()=>bindSelection(modelDirectories)
   bind()
-  unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(bind)
+  unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(()=>{
+   bind()
+   if(desiredSelection)reconcileBrowser().catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+  })
  })
- bridgeTimer=setInterval(processBridgeRequest,BRIDGE_POLL_MS)
+
+ reconcileTimer=setInterval(()=>{
+  if(desiredSelection)reconcileBrowser().catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+ },RECONCILE_MS)
+
+ bridgeTimer=setInterval(processBridgeRequest,120)
+
  ctx.effect(()=>()=>{
   unsubscribeSelection()
   unsubscribeMounted()
+  clearInterval(reconcileTimer)
   clearInterval(bridgeTimer)
- },'dsh-account-models: provider browser sync')
+  clearTimeout(probeTimer)
+  desiredSelection=undefined
+ },'dsh-account-models: browser state reconciler')
 }
 
 apply.lastKey=''
