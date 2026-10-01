@@ -227,7 +227,7 @@ function apply(ctx){
     desiredSelection=next
     if(!next)return
     console.info('[dsh-account-models] selected Web AI provider:',next.id,next.url)
-    reconcileBrowser().catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+    reconcileBrowser(ctx).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
     startProbe()
    }
    unsubscribeSelection=directory.store.subscribe(update)
@@ -243,12 +243,12 @@ function apply(ctx){
   bind()
   unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(()=>{
    bind()
-   if(desiredSelection)reconcileBrowser().catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+   if(desiredSelection)reconcileBrowser(ctx).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
   })
  })
 
  reconcileTimer=setInterval(()=>{
-  if(desiredSelection)reconcileBrowser().catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+  if(desiredSelection)reconcileBrowser(ctx).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
  },RECONCILE_MS)
 
  bridgeTimer=setInterval(processBridgeRequest,120)
