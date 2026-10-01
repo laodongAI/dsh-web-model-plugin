@@ -51,6 +51,10 @@ export class DefaultBrowserProvider implements BrowserProvider {
   try{return await this.createPage(this.cdp).canChat()}catch{return false}
  }
 
+ async health(){
+  return this.createPage(this.cdp).health()
+ }
+
  async *chat(req:BrowserChatRequest){
   const sessionId=req.sessionId??req.accountId
   this.conversations.begin(req.accountId,sessionId)
