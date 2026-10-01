@@ -1,8 +1,15 @@
 import {LlmAdapter,LlmError,type GenerateOptions,type LlmModelInfo,type LlmResolvedModelInfo,type StreamChunk,type ToolCallId} from '@deepseek-ai/dsh-llm'
 import type {AccountManager} from './account-manager.js'
 import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
+import {PROVIDERS,PROVIDER_MAP} from './provider-catalog.js'
+import type {AccountProvider} from './types.js'
 
 const DEFAULT_MODEL_ID='default'
+
+function providerOfModel(model:string):AccountProvider|undefined{
+ if((PROVIDERS as readonly {id:AccountProvider}[]).some(x=>x.id===model))return model as AccountProvider
+ return undefined
+}
 
 const TOOL_CALL_RE=/<dsh_tool_call>\s*([\s\S]*?)\s*<\/dsh_tool_call>/g
 
@@ -30,32 +37,36 @@ export class DshBrowserAdapter extends LlmAdapter{
  }
 
  override async listModels(provider:string):Promise<readonly LlmModelInfo[]>{
-  const account=this.accounts.getDefaultAccount()
-  if(!account)return [{provider,id:DEFAULT_MODEL_ID,name:'Web AI（未配置账号）',description:'请在 Web AI 设置中添加并登录浏览器账号',inputModalities:['text','image']}]
-  return [{
-   provider,
-   id:DEFAULT_MODEL_ID,
-   name:account.displayName,
-   description:`${account.provider} · ${account.status==='ready'?'已登录':account.status==='login_required'?'需要登录':'浏览器会话状态未知'}`,
-   inputModalities:['text','image'],
-  }]
+  if(provider!=='web-ai')return []
+  return PROVIDERS.map(item=>{
+   const account=this.accounts.findByProvider(item.id)
+   const state=account?.status==='ready'?'已就绪':account?.status==='login_required'?'需要登录':'首次使用将打开浏览器'
+   return {provider,id:item.id,name:item.name+'（浏览器）',description:`${item.name} · ${state}`,inputModalities:['text','image'] as const}
+  })
  }
 
- override async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
+ override async resolveModel(provider:string,model:string,signal?:AbortSignal):P override async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
   if(signal?.aborted)throw signal.reason??new Error('请求已取消')
   if(provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${provider}`,'MODEL_UNAVAILABLE')
-  const accountId=accountIdOf(model)
-  const account=accountId?this.accounts.list().find(a=>a.id===accountId):this.accounts.getDefaultAccount()
-  console.info('[dsh-account-models] resolveModel',JSON.stringify({provider,model,accountId:account?.id??null,accountStatus:account?.status??null}))
-  if(!account)throw new LlmError('尚未配置默认 Web AI 浏览器账号，请先打开 Web AI 设置完成配置','MODEL_UNAVAILABLE')
-  return {provider,id:model,name:account.displayName,inputModalities:['text','image']}
+  const selected=providerOfModel(model)
+  if(selected){
+   const account=this.accounts.findByProvider(selected)
+   return {provider,id:model,name:PROVIDER_MAP[selected].name+'（浏览器）',inputModalities:['text','image']}
+  }
+  if(model===DEFAULT_MODEL_ID){
+   const account=this.accounts.getDefaultAccount()
+   if(account)return {provider,id:model,name:account.displayName,inputModalities:['text','image']}
+  }
+  const legacy=this.accounts.list().find(a=>a.id===model)
+  if(legacy)return {provider,id:model,name:legacy.displayName,inputModalities:['text','image']}
+  throw new LlmError(`未知 Web AI 模型：${model}`,'MODEL_UNAVAILABLE')
  }
 
  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
   if(options.provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${options.provider}`,'MODEL_UNAVAILABLE')
-  const accountId=accountIdOf(options.model)
-  const account=accountId?this.accounts.list().find(a=>a.id===accountId):this.accounts.getDefaultAccount()
-  if(!account)throw new LlmError('尚未配置默认 Web AI 浏览器账号，请先打开 Web AI 设置完成配置','MODEL_UNAVAILABLE')
+  const selected=providerOfModel(options.model)
+  const account=selected?await this.accounts.ensureProvider(selected):this.accounts.getDefaultAccount()
+  if(!account)throw new LlmError('尚未选择有效的 Web AI Provider','MODEL_UNAVAILABLE')
   let adapter=this.accounts.getProvider(account.id)
   if(!adapter){
    await this.accounts.open(account.id)
