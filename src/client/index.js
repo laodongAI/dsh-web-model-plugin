@@ -4,22 +4,15 @@ const PROVIDERS=[
  ['copilot','Microsoft Copilot','https://copilot.microsoft.com/'],['huggingchat','HuggingChat','https://huggingface.co/chat/'],['kimi','Kimi','https://kimi.moonshot.cn/'],['chatglm','智谱 AI','https://chatglm.cn/'],
 ]
 
-const RECONCILE_MS=500
 const BRIDGE_WAIT_MS=12000
 let bridgeTimer
-let reconcileTimer
-let reconcileBusy=false
 let desiredSelection
 let modelDirectories
+let openedProviderKeys=new Set()
 let unsubscribeSelection=()=>{}
 let unsubscribeMounted=()=>{}
 let unsubscribeAgentStatus=()=>{}
 let unsubscribeAssistantStream=()=>{}
-let lastOpenKey=''
-let lastOpenAt=0
-let openingKey=''
-let openingUntil=0
-
 // Cordis Client 服务依赖：apply() 内所有 sidebar/modelDirectory 访问都必须声明注入。
 // 否则 ctx.sidebarRight / modelDirectories 在运行时不可读，状态协调器会静默失效。
 const inject=['modelDirectories','sidebarRight']
@@ -151,89 +144,46 @@ function browserState(ctx,sessionId,provider){
  }
 }
 
-function openProviderBrowser(ctx,provider){
- const key=provider.id+'|'+provider.url
- const now=Date.now()
- if(key===openingKey&&now<openingUntil)return false
- if(key===lastOpenKey&&now-lastOpenAt<5000)return false
+function openProviderBrowser(ctx,provider,sessionId){
+ const key=sessionId+'|'+provider.id+'|'+provider.url
+ // 一个 Session + 一个 Provider 只允许执行一次系统 openTab。
+ // 打开之后进入纯观察模式：不因加载、登录、页面变化或 Sidebar 状态再次创建 Tab。
+ if(openedProviderKeys.has(key)){
+  console.info('[dsh-account-models] browser action: already opened, wait for manual operation',provider.id)
+  return false
+ }
  try{
-  // 使用 DSH 原生 openTab 的默认去重语义：同 kind + 同 address 时复用/聚焦已有 Tab。
-  // 不再设置 revealIfOpened:false，否则会主动绕过原生去重，造成重复 Browser Tab。
   ctx.sidebarRight.openTab('browser',{params:{url:provider.url}})
-  openingKey=key
-  openingUntil=now+8000
-  lastOpenKey=key
-  lastOpenAt=now
-  console.info('[dsh-account-models] browser action: open/reuse',provider.id,provider.url)
+  openedProviderKeys.add(key)
+  console.info('[dsh-account-models] browser action: open once, then wait for manual operation',provider.id,provider.url)
   return true
  }catch(error){
   console.warn('[dsh-account-models] browser action failed:',error)
   return false
  }
 }
+async function reconcileBrowser(ctx,reason='observe'){
+ const {sessionId,provider}=currentSelection(ctx)
+ if(!sessionId||!provider)return
 
-async function reconcileBrowser(ctx,reason='poll'){
- if(reconcileBusy)return
- reconcileBusy=true
- try{
-  const {sessionId,provider}=currentSelection(ctx)
-  if(!sessionId||!provider)return
+ const sidebar=rightSidebarState(ctx)
+ const browser=browserState(ctx,sessionId,provider.id)
+ console.info('[dsh-account-models] state:',JSON.stringify({
+  reason,
+  provider:provider.id,
+  sidebar,
+  browser
+ }))
 
-  const sidebar=rightSidebarState(ctx)
-  const browser=browserState(ctx,sessionId,provider.id)
-  console.info('[dsh-account-models] state:',JSON.stringify({
-   reason,
-   provider:provider.id,
-   sidebar,
-   browser
-  }))
-
-  // 状态 1：没有当前 Session 的右侧 Sidebar。
-  // openTab 会在 Session 可用时直接作用于当前会话；这里先等待 mounted。
+ // 系统只负责首次打开 Provider 页面；之后完全交给人工处理页面。
+ // 不再根据 loading/matching/count/sidebar 状态调用 openTab。
+ if(!openedProviderKeys.has(sessionId+'|'+provider.id+'|'+provider.url)){
   if(!sidebar.mounted)return
-
-  // 状态 2：Sidebar 未展开。
-  // DSH 官方 openTab 会在打开 Browser 的同时展开右栏。
-  if(!sidebar.expanded){
-   openProviderBrowser(ctx,provider)
-   return
-  }
-
-  // 状态 3：Sidebar 已展开，但没有 Browser tab。
-  if(browser.count===0){
-   openProviderBrowser(ctx,provider)
-   return
-  }
-
-  // 状态 4：Browser Tab 已存在，但 WebView 尚未建立/尚未得到稳定 URL。
-  // 这是 DSH Browser 的正常加载窗口，绝不能重复创建 Browser Tab。
-  if(browser.loading|| (openingKey===provider.id+'|'+provider.url&&Date.now()<openingUntil)){
-   console.info('[dsh-account-models] browser action: wait for native Browser load',provider.id)
-   return
-  }
-
-  // 状态 5：已有 Browser，但没有当前 Provider 页面。
-  // 不抢占用户已有页面；创建一个新的原生 Browser 实例承载目标 Provider。
-  if(!browser.matching){
-   openProviderBrowser(ctx,provider)
-   return
-  }
-
-  // 状态 5：目标 Provider 页面存在。
-  // 不强制导航；每次 Chat 的 Host adapter 会再次做 health() 校验。
-  if(browser.matching&&openingKey===provider.id+'|'+provider.url){
-   openingKey=''
-   openingUntil=0
-  }
-
-  console.info('[dsh-account-models] browser action: matching provider page found',provider.id)
- }finally{
-  reconcileBusy=false
+  openProviderBrowser(ctx,provider,sessionId)
+  return
  }
-}
 
-function triggerReconcile(ctx,reason){
- reconcileBrowser(ctx,reason).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+ console.info('[dsh-account-models] browser action: observe only; manual operation owns page state',provider.id)
 }
 
 function bindSelection(ctx){
@@ -295,10 +245,6 @@ function apply(ctx){
   triggerReconcile(ctx,'assistant-stream-start')
  })
 
- reconcileTimer=setInterval(()=>{
-  if(desiredSelection)triggerReconcile(ctx,'poll')
- },RECONCILE_MS)
-
  bridgeTimer=setInterval(processBridgeRequest,120)
 
  ctx.effect(()=>()=>{
@@ -310,6 +256,7 @@ function apply(ctx){
   clearInterval(bridgeTimer)
   desiredSelection=undefined
   modelDirectories=undefined
+  openedProviderKeys.clear()
  },'dsh-account-models: browser state reconciler')
 }
 
