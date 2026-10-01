@@ -49,7 +49,7 @@ DSH Agent Loop → web-ai → 选中的 Web AI Provider model → AccountProvide
 
 DSH 解析/执行选中的 Provider 后，插件会记录当前 Provider；Client 侧自动把对应 URL 打开到 DSH 原生 Right Sidebar Browser，并复用相同 URL 的 Browser Tab。用户可以直接在右侧完成登录、验证和人工调试。
 
-当前 0.2.3 仍有一个明确的运行时边界：Host 的 CDP 自动化浏览器与 DSH Right Sidebar 的 Electron `<webview>` 还不是同一个 guest。也就是说，0.2.3 已经实现“Provider 选择 → 右侧原生 Browser 自动打开”和“异常提示 → 用户右侧修复 → Chat 重试”，但尚未声称 Host 已经可以直接操作这个可见 webview。
+0.2.4 已取消插件自行启动 Chrome/Chromium 的运行时路径。Provider 选择后直接打开 DSH 原生 Right Sidebar Browser；Desktop 的 Browser Tab 使用 Electron `<webview>`，插件 Client 通过受控 bridge 将 Host 页面适配器的 DOM 操作转发到当前 Provider 的可见 webview。因此用户手工登录/调整的就是 Agent 后续真正使用的页面。
 
 ## HTTP Routes
 GET  /api/dsh-account-models/accounts
@@ -77,7 +77,7 @@ pnpm typecheck
 pnpm build
 pnpm pack --pack-destination .\packed
 
-当前版本：dsh-account-models-0.2.3.tgz
+当前版本：dsh-account-models-0.2.4.tgz
 
 建议每次生成新的 tgz 后再安装，避免 DSH 插件管理器继续使用旧缓存包。
 
@@ -108,10 +108,10 @@ DSH 官方 Right Sidebar Browser 在 Desktop 中使用 Electron `<webview>`，�
 
 因此 0.2.3 不伪装“两个浏览器已经统一”。当前已经完成：Provider 只在 DSH 中间模型选择器出现；选中 Provider 后自动打开对应右侧 Browser；用户在右侧完成登录/验证；Host 请求失败时 DSH Chat 给出明确的右侧修复提示；用户修复后再次发送即可重新验证。
 
-下一阶段需要在 DSH Browser 正式增加 **Browser Automation Bridge**：由右侧 Browser Tab 自己持有 guest/webview，并向受控插件暴露 `currentTab`、`navigate`、`evaluate`、`waitForSelector`、`screenshot`、`sendInput` 等受限能力，再让本插件的 Host/Client 两侧通过该 Bridge 操作同一个 Browser Tab。这样才能真正达到“用户看到的右侧浏览器 = Agent 调试/DOM 操作的浏览器”。右侧 Browser 本身是 DSH 原生能力，不应再额外启动第二个可见浏览器。
+当前 Browser Automation Bridge 已在插件内落地为 Host HTTP 队列 + DSH Client `<webview>.executeJavaScript()` 的受控通道。它只执行本插件页面适配器产生的 DOM 表达式，不向网页暴露 Node/Electron API。文件上传仍要求用户先在右侧浏览器手工完成，因为 Electron webview 的 DOM 执行接口不能等价替代原生 CDP 的文件选择能力。后续如 DSH 官方开放更完整的 Browser automation seam，可再将该 bridge 替换为官方接口。
 
 ## 安全边界
 本插件不保存密码、不提取 Cookie/Token、不调用目标站点私有 API、不重放浏览器 HTTP 请求、不绕过 CAPTCHA 或二次验证。
 
-当前版本：0.2.3
+当前版本：0.2.4
 目标：DSH 0.2.0-rc.2
