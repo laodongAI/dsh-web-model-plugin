@@ -79,6 +79,7 @@ export class DefaultBrowserProvider implements BrowserProvider {
 
  classifyError(error:unknown):BrowserProviderErrorCode{
   const s=error instanceof Error?error.message:String(error)
+  if(/BROWSER_NOT_READY/i.test(s))return 'SERVICE_UNAVAILABLE'
   if(/PAGE_CHANGED/i.test(s))return 'PAGE_CHANGED'
   if(/LOGIN_REQUIRED|登录|log in|sign in/i.test(s))return 'LOGIN_REQUIRED'
   if(/额度|limit|quota|usage limit/i.test(s))return 'QUOTA_EXCEEDED'
