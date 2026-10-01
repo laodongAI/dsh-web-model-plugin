@@ -12,19 +12,13 @@ export function registerRoutes(m:AccountManager,register:(r:Route)=>()=>void){
   {kind:'exact',path:'/api/dsh-account-models/browser/view',handler:async(q,s)=>{
    if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405)
    try{
-    const id=new URL(q.url??'/', 'http://dsh.local').searchParams.get('accountId')||m.getDefaultAccount()?.id
-    if(!id)return json(s,{error:'未配置默认 Web AI 账号'},400)
+    const id=new URL(q.url??'/', 'http://dsh.local').searchParams.get('accountId')
+    if(!id)return json(s,{error:'accountId 必填；Provider 由 DSH 中间模型选择器决定'},400)
     const a=m.list().find(x=>x.id===id)
     if(!a)return json(s,{error:'账号不存在'},404)
     const shot=await m.screenshot(id)
     return json(s,{accountId:id,provider:a.provider,displayName:a.displayName,status:a.status,url:shot.url,title:shot.title,image:`data:image/jpeg;base64,${shot.data}`})
    }catch(error){return json(s,{error:error instanceof Error?error.message:String(error)},400)}
-  }},
-  {kind:'exact',path:'/api/dsh-account-models/config',handler:async(q,s)=>{
-   if(q.method==='GET')return json(s,m.getConfig())
-   if(q.method!=='POST')return json(s,{error:'Method Not Allowed'},405)
-   try{return json(s,await m.setConfig(await body(q) as {defaultProvider?:AccountProvider;defaultAccountId?:string}))}
-   catch(error){return json(s,{error:error instanceof Error?error.message:String(error)},400)}
   }},
   {kind:'exact',path:'/api/dsh-account-models/accounts/add',handler:async(q,s)=>{
    if(q.method!=='POST')return json(s,{error:'Method Not Allowed'},405)
