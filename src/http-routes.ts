@@ -1,6 +1,7 @@
 import {IncomingMessage,ServerResponse} from 'node:http'
 import type {AccountManager} from './account-manager.js'
 import type {AccountProvider} from './types.js'
+import {PROVIDER_MAP} from './provider-catalog.js'
 
 const SUPPORTED:readonly AccountProvider[]=['deepseek','chatgpt','qwen','tencent-yuanbao','doubao','perplexity','copilot','huggingchat','kimi','chatglm']
 
@@ -9,6 +10,13 @@ type Route={kind:'exact'|'prefix';path:string;handler:(q:IncomingMessage,s:Serve
 export function registerRoutes(m:AccountManager,register:(r:Route)=>()=>void){
  const routes:Route[]=[
   {kind:'exact',path:'/api/dsh-account-models/accounts',handler:async(q,s)=>{if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405);return json(s,m.list())}},
+  {kind:'exact',path:'/api/dsh-account-models/active-provider',handler:async(q,s)=>{
+   if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405)
+   const provider=m.getSelectedProvider()
+   if(!provider)return json(s,{provider:null})
+   const account=m.findByProvider(provider)
+   return json(s,{provider,name:PROVIDER_MAP[provider].name,url:PROVIDER_MAP[provider].url,status:account?.status??'not_initialized',accountId:account?.id??null})
+  }},
   {kind:'exact',path:'/api/dsh-account-models/browser/view',handler:async(q,s)=>{
    if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405)
    try{
@@ -29,7 +37,7 @@ export function registerRoutes(m:AccountManager,register:(r:Route)=>()=>void){
    }catch(error){return json(s,{error:error instanceof Error?error.message:String(error)},500)}
   }},
  ]
-
+ 
  for(const action of ['open','check','close'] as const){
   routes.push({kind:'exact',path:`/api/dsh-account-models/accounts/${action}`,handler:async(q,s)=>{
    if(q.method!=='POST')return json(s,{error:'Method Not Allowed'},405)
