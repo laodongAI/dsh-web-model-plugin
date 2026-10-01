@@ -8,7 +8,8 @@ const BRIDGE_WAIT_MS=12000
 let bridgeTimer
 let modelDirectories
 let currentProviderBySession=new Map()
-let reconcilePromiseBySession=new Map()\nlet openingProviderBySession=new Map()
+let reconcilePromiseBySession=new Map()
+let openingProviderBySession=new Map()
 let unsubscribeSelection=()=>{}
 let unsubscribeMounted=()=>{}
 let unsubscribeAgentStatus=()=>{}
@@ -125,8 +126,10 @@ function currentBrowserUrls(){
 function hasMatchingProviderTab(ctx,sessionId,provider){
  const tabs=browserTabs(ctx,sessionId)
  const urls=currentBrowserUrls()
- const matching=urls.some(url=>providerHost(provider.id,url))
- return {tabs,urls,matching}
+ const urlMatching=urls.some(url=>providerHost(provider.id,url))
+ const pendingSameProvider=openingProviderBySession.get(sessionId)===provider.id && tabs.length>0 && urls.length===0
+ const matching=tabs.length>0 && (urlMatching||pendingSameProvider)
+ return {tabs,urls,matching,urlMatching,pendingSameProvider}
 }
 
 function safeClose(ctx,tabId){
@@ -139,11 +142,13 @@ function safeClose(ctx,tabId){
 }
 
 function closeProviderTabs(ctx,sessionId){
+ openingProviderBySession.delete(sessionId)
  for(const tab of browserTabs(ctx,sessionId))safeClose(ctx,tab.tabId)
 }
 
 function openProviderBrowser(ctx,provider,sessionId){
  try{
+  openingProviderBySession.set(sessionId,provider.id)
   ctx.sidebarRight.openTab('browser',{params:{url:provider.url}})
   console.info('[dsh-account-models] browser action: open provider page',provider.id,provider.url)
   return true
@@ -165,7 +170,10 @@ async function reconcileBrowser(ctx,reason='observe'){
   reason,sessionId,provider:provider.id,tabCount:state.tabs.length,matching:state.matching,urls:state.urls
  }))
 
- if(state.matching)return {opened:false,matching:true,provider}
+ if(state.matching){
+  if(state.urlMatching)openingProviderBySession.delete(sessionId)
+  return {opened:false,matching:true,provider}
+ }
 
  // 没有与当前 Web AI Provider 匹配的 Browser：
  // 1) 关闭当前会话残留的旧 Browser Tab；
@@ -173,6 +181,7 @@ async function reconcileBrowser(ctx,reason='observe'){
  // 3) 打开后不再自动导航/登录/切换模型，后续完全交给人工。
  if(state.tabs.length)closeProviderTabs(ctx,sessionId)
  const opened=openProviderBrowser(ctx,provider,sessionId)
+ if(!opened)openingProviderBySession.delete(sessionId)
  return {opened,matching:false,provider}
 }
 
@@ -273,6 +282,7 @@ function apply(ctx){
   clearInterval(bridgeTimer)
   currentProviderBySession.clear()
   reconcilePromiseBySession.clear()
+  openingProviderBySession.clear()
   modelDirectories=undefined
  },'dsh-account-models: browser lifecycle controller')
 }
