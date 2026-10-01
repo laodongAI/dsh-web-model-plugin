@@ -42,7 +42,6 @@ export class WebviewBrowserBridge {
   return {
    evaluate:<T>(expression:string)=>this.evaluate<T>(provider,expression),
    async setFileInputFiles(){throw new Error('当前使用 DSH 右侧原生 Browser，文件上传请先在右侧浏览器手工完成')},
-   async screenshot(){throw new Error('当前使用 DSH 右侧原生 Browser，暂不支持 Host 截图')},
    async close(){},
   }
  }
