@@ -35,7 +35,7 @@ export class DefaultBrowserProvider implements BrowserProvider {
    this.conversations.markDesynced(sessionId)
    throw new Error('PAGE_CHANGED: 当前网页已切换到其他会话')
   }
-  this.conversations.bind(sessionId,accountId,tab,state.conversationId)
+  this.conversations.bind(sessionId,accountId,{id:'dsh-native-browser',url:state.url,title:''},state.conversationId)
   return {cdp:this.cdp,page}
  }
 
