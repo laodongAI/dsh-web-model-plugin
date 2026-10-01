@@ -3,6 +3,7 @@ import {PROVIDER_MAP} from '../provider-catalog.js'
 import type {AccountProvider} from '../types.js'
 import type {BrowserChatRequest,BrowserProvider,BrowserProviderModel,BrowserProviderErrorCode} from './provider.js'
 import type {WebPageTiming} from './web-page.js'
+import type {CdpClient} from '../browser/cdp-client.js'
 import {DeepSeekPage} from './deepseek/deepseek-page.js'
 import {ChatGptPage} from './chatgpt/chatgpt-page.js'
 import {QwenPage} from './qwen/qwen-page.js'
@@ -15,9 +16,9 @@ import {KimiPage} from './kimi/kimi-page.js'
 import {ChatGlmPage} from './chatglm/chatglm-page.js'
 
 export class DefaultBrowserProvider implements BrowserProvider {
- constructor(public readonly provider:AccountProvider,private readonly cdp:import('../browser/cdp-client.js').CdpClient,private readonly conversations=new BrowserConversationManager(),private readonly timing:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){}
+ constructor(public readonly provider:AccountProvider,private readonly cdp:CdpClient,private readonly conversations=new BrowserConversationManager(),private readonly timing:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){}
 
- private createPage(cdp:import('../browser/cdp-client.js').CdpClient){
+ private createPage(cdp:CdpClient){
   const pages={deepseek:DeepSeekPage,chatgpt:ChatGptPage,qwen:QwenPage,'tencent-yuanbao':TencentYuanbaoPage,doubao:DoubaoPage,perplexity:PerplexityPage,copilot:CopilotPage,huggingchat:HuggingChatPage,kimi:KimiPage,chatglm:ChatGlmPage} as const
   const C=pages[this.provider]
   return new C(cdp,this.timing)
@@ -44,10 +45,7 @@ export class DefaultBrowserProvider implements BrowserProvider {
   return [{id:item.id+'-web',name:item.name+' Web'}]
  }
 
- async screenshot(){
-  const state=await this.cdp.evaluate<{url:string;title:string}>(`(()=>({url:location.href,title:document.title}))()`)
-  return {...await this.cdp.screenshot(),url:state.url,title:state.title}
- }
+
 
  async checkReady(){
   try{return await this.createPage(this.cdp).canChat()}catch{return false}
