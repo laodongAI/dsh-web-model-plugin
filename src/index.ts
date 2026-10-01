@@ -13,16 +13,12 @@ import {WebviewBrowserBridge} from './browser/webview-bridge.js'
 export const name='dsh-account-models'
 
 export interface Config {
- chromePath?:string
- cdpReadyTimeoutMs:number
  streamTimeoutMs:number
  noStartTimeoutMs:number
  uploadTimeoutMs:number
 }
 
 export const Config:Schema<Config>=Schema.object({
- chromePath:Schema.string().role('path').default(undefined as unknown as string),
- cdpReadyTimeoutMs:Schema.number().min(1000).default(20000),
  streamTimeoutMs:Schema.number().min(10000).default(600000),
  noStartTimeoutMs:Schema.number().min(1000).default(300000),
  uploadTimeoutMs:Schema.number().min(1000).default(15000),
@@ -52,7 +48,7 @@ export async function apply(ctx:Context,config:Config){
  await bootLog(`apply: entered; pid=${process.pid}; node=${process.version}; cwd=${process.cwd()}`)
  try{
   syncLog('CONFIG_RECEIVED')
-  await bootLog(`config: ${JSON.stringify({chromePath:config.chromePath??null,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs,streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})}`)
+  await bootLog(`config: ${JSON.stringify({streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})}`)
   syncLog('ACCOUNT_MANAGER_CREATING')
   const bridge=new WebviewBrowserBridge()
   const accounts=new AccountManager(bridge,{streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})
