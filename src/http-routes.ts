@@ -18,6 +18,14 @@ export function registerRoutes(m:AccountManager,bridge:WebviewBrowserBridge,regi
    const account=m.findByProvider(provider)
    return json(s,{provider,name:PROVIDER_MAP[provider].name,url:PROVIDER_MAP[provider].url,status:account?.status??'not_initialized',accountId:account?.id??null})
   }},
+  {kind:'exact',path:'/api/dsh-account-models/browser/check',handler:async(q,s)=>{
+   if(q.method!=='POST')return json(s,{error:'Method Not Allowed'},405)
+   try{
+    const b=await body(q) as {provider?:AccountProvider}
+    if(!b.provider||!SUPPORTED.includes(b.provider))return json(s,{error:'provider 不受支持'},400)
+    return json(s,await m.checkProvider(b.provider))
+   }catch(error){return json(s,{error:error instanceof Error?error.message:String(error)},400)}
+  }},
   {kind:'exact',path:'/api/dsh-account-models/browser/bridge/next',handler:async(q,s)=>{
    if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405)
    const request=bridge.next()
