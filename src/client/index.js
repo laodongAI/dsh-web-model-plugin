@@ -156,7 +156,7 @@ async function probeProvider(provider){
  }
 }
 
-async function reconcileBrowser(){
+async function reconcileBrowser(ctx){
  if(reconcileBusy||!desiredSelection)return
  reconcileBusy=true
  try{
@@ -205,7 +205,7 @@ async function reconcileBrowser(){
 function startProbe(){
  clearTimeout(probeTimer)
  probeTimer=setTimeout(()=>{
-  reconcileBrowser().catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+  reconcileBrowser(ctx).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
  },PROBE_AFTER_OPEN_MS)
 }
 
