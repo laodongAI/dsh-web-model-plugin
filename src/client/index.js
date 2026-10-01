@@ -18,6 +18,10 @@ let unsubscribeAssistantStream=()=>{}
 let lastOpenKey=''
 let lastOpenAt=0
 
+// Cordis Client 服务依赖：apply() 内所有 sidebar/modelDirectory 访问都必须声明注入。
+// 否则 ctx.sidebarRight / modelDirectories 在运行时不可读，状态协调器会静默失效。
+const inject=['modelDirectories','sidebarRight']
+
 async function processBridgeRequest(){
  try{
   const response=await fetch('/api/dsh-account-models/browser/bridge/next',{cache:'no-store'})
@@ -287,4 +291,4 @@ function apply(ctx){
 }
 
 apply.lastKey=''
-module.exports={apply}
+module.exports={apply,inject}
