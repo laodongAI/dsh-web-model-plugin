@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import {AccountManager} from './account-manager.js'
 import {registerRoutes} from './http-routes.js'
 import {DshBrowserAdapter} from './dsh-browser-adapter.js'
+import {WebviewBrowserBridge} from './browser/webview-bridge.js'
 
 export const name='dsh-account-models'
 
@@ -53,7 +54,8 @@ export async function apply(ctx:Context,config:Config){
   syncLog('CONFIG_RECEIVED')
   await bootLog(`config: ${JSON.stringify({chromePath:config.chromePath??null,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs,streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})}`)
   syncLog('ACCOUNT_MANAGER_CREATING')
-  const accounts=new AccountManager({chromePath:config.chromePath,cdpReadyTimeoutMs:config.cdpReadyTimeoutMs},{streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})
+  const bridge=new WebviewBrowserBridge()
+  const accounts=new AccountManager(bridge,{streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})
   syncLog('ACCOUNT_MANAGER_CREATED')
   await bootLog('apply: AccountManager created')
   syncLog('ACCOUNT_INIT_START')
@@ -73,11 +75,11 @@ export async function apply(ctx:Context,config:Config){
   await bootLog('llm.registerAdapter: completed')
   syncLog('ROUTES_REGISTER_START')
   await bootLog('webServer routes: starting')
-  const disposeRoutes=registerRoutes(accounts,r=>{syncLog(`ROUTE_REGISTER ${r.kind} ${r.path}`);void bootLog(`webServer.register: ${r.kind} ${r.path}`);return ctx.webServer.register(r)})
+  const disposeRoutes=registerRoutes(accounts,bridge,r=>{syncLog(`ROUTE_REGISTER ${r.kind} ${r.path}`);void bootLog(`webServer.register: ${r.kind} ${r.path}`);return ctx.webServer.register(r)})
   syncLog('ROUTES_REGISTER_COMPLETED')
   await bootLog('apply: routes registered')
   syncLog('EFFECT_REGISTER_START')
-  ctx.effect(()=>()=>{syncLog('DISPOSE_START');try{disposeAdapter()}catch(error){syncLog(`DISPOSE_ADAPTER_FAILED ${error instanceof Error?error.message:String(error)}`)}try{disposeRoutes()}catch(error){syncLog(`DISPOSE_ROUTES_FAILED ${error instanceof Error?error.message:String(error)}`)}void accounts.dispose().catch(error=>syncLog(`DISPOSE_ACCOUNTS_FAILED ${error instanceof Error?error.message:String(error)}`));syncLog('DISPOSE_COMPLETED')},'dsh-account-models')
+  ctx.effect(()=>()=>{syncLog('DISPOSE_START');try{disposeAdapter()}catch(error){syncLog(`DISPOSE_ADAPTER_FAILED ${error instanceof Error?error.message:String(error)}`)}try{disposeRoutes()}catch(error){syncLog(`DISPOSE_ROUTES_FAILED ${error instanceof Error?error.message:String(error)}`)}bridge.dispose();void accounts.dispose().catch(error=>syncLog(`DISPOSE_ACCOUNTS_FAILED ${error instanceof Error?error.message:String(error)}`));syncLog('DISPOSE_COMPLETED')},'dsh-account-models')
   syncLog('EFFECT_REGISTER_COMPLETED')
   await bootLog('webServer routes: completed')
   syncLog('APPLY_COMPLETED')
