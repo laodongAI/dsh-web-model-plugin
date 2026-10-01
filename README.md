@@ -24,9 +24,9 @@
 - LLM 流式输出遵循 DSH LlmAdapter / StreamChunk 协议。
 
 ## Client
-- 不再提供插件 Settings 配置页。
-- Provider 直接出现在 DSH 中间模型选择器中，共 10 个 Web AI Provider。
-- Right Sidebar 使用 DSH 原生 Browser；官方 Browser 支持多实例/多 Tab，Provider 登录和人工调试优先在这里完成。
+- 不再提供插件 Settings 配置页，也不再维护默认 Provider / 默认账号运行时配置。
+- Provider 直接出现在 DSH 中间模型选择器中，共 10 个 Web AI Provider；**不新增左侧 Provider 栏，不改变 DSH 原生三栏布局**。
+- Right Sidebar 使用 DSH 原生 Browser；官方 Browser 支持多实例/多 Tab，网站打开、人工登录和人工调试优先在这里完成。
 - Client bundle 保留最小生命周期入口，避免再增加一套 Provider 配置 UI。
 
 ## Web AI 模型
@@ -54,8 +54,6 @@ DSH Agent Loop → web-ai → 选中的 Web AI Provider model → AccountProvide
 ## HTTP Routes
 GET  /api/dsh-account-models/accounts
 GET  /api/dsh-account-models/browser/view?accountId=...
-GET  /api/dsh-account-models/config
-POST /api/dsh-account-models/config
 POST /api/dsh-account-models/accounts/add
 POST /api/dsh-account-models/accounts/open
 POST /api/dsh-account-models/accounts/check
@@ -78,7 +76,7 @@ pnpm typecheck
 pnpm build
 pnpm pack --pack-destination .\packed
 
-当前版本：dsh-account-models-0.2.1.tgz
+当前版本：dsh-account-models-0.2.2.tgz
 
 建议每次生成新的 tgz 后再安装，避免 DSH 插件管理器继续使用旧缓存包。
 
@@ -97,7 +95,7 @@ dsh.cmd plugin --profile desktop remove dsh-account-models
 3. 选择任一 Provider 后，首次发送消息自动创建/打开该 Provider 的可见 Chromium 会话。
 4. 在浏览器中手工完成网页登录；后续请求复用该 Provider 的持久 Profile。
 5. 右侧 Sidebar 使用 DSH 原生 Browser 多 Tab 进行网页浏览和调试。
-6. 普通 DSH 对话能够通过网页模型完成请求，Web AI 长 Thinking 不再因默认 60 秒无首字超时提前失败。
+6. 普通 DSH 对话必须先在 DSH 中间模型选择器明确选择一个 Web AI Provider，再通过该 Provider 完成请求；Web AI 长 Thinking 不再因默认 60 秒无首字超时提前失败。
 8. 同一 DSH Session 保持对应网页 Conversation。
 9. 当 DSH 提供 tools 时，Web AI 可以通过工具调用协议请求本地 Agent Tool，由 DSH 执行后继续下一轮模型推理。
 10. Stop 能停止网页生成。
@@ -105,12 +103,12 @@ dsh.cmd plugin --profile desktop remove dsh-account-models
 12. Right Sidebar 的 Web AI 浏览器能够显示真实 Chromium 页面。
 
 ## 当前边界
-右侧 Sidebar 的原生 Browser 与插件 Host 启动的 CDP Chromium 当前是两个浏览器载体：Sidebar Browser 负责用户可见的网页浏览、登录和调试；Host Chromium 负责稳定的 CDP/DOM 自动化。DSH 官方 Browser Tab 支持多实例、多 Tab，但当前公开插件契约没有把该 Electron webview 的 CDP attach 能力暴露给 Host 插件，因此本版本不伪装成“同一个浏览器会话”。
+右侧 Sidebar 的原生 Browser 与插件 Host 启动的 CDP Chromium 当前是两个浏览器载体：Sidebar Browser 负责用户可见的网页浏览、登录和调试；Host Chromium 负责稳定的 CDP/DOM 自动化。**因此当前版本不把左侧 Provider 做成独立栏，也不伪装成“右侧 Browser 已经可以被 Host CDP 控制”。** DSH 官方 Browser Tab 支持多实例、多 Tab，但当前公开插件契约没有把该 Electron webview 的 CDP attach 能力暴露给 Host 插件，因此本版本仍保留两个载体。
 
-下一阶段如果能获得稳定的 BrowserView/CDP attach seam，再把两者合并为真正的“右侧浏览器即自动化浏览器”。在此之前，Provider 选择、持久登录态、CDP 自动化和右侧多 Tab UI 各自职责清晰。
+下一阶段如果能获得稳定的 BrowserView/CDP attach seam，再把两者合并为真正的“右侧浏览器即自动化浏览器”。届时 Browser Workspace 应成为统一的浏览器运行时：用户在右侧打开网站/多 Tab，Agent 调试和 DOM 操作也针对当前 Tab；Provider 仍然只存在于 DSH 中间模型选择器，不新增左侧栏。在此之前，Provider 选择、持久登录态、CDP 自动化和右侧多 Tab UI 各自职责清晰。
 
 ## 安全边界
 本插件不保存密码、不提取 Cookie/Token、不调用目标站点私有 API、不重放浏览器 HTTP 请求、不绕过 CAPTCHA 或二次验证。
 
-当前版本：0.2.1
+当前版本：0.2.2
 目标：DSH 0.2.0-rc.2
