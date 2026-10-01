@@ -54,7 +54,6 @@ DSH 解析/执行选中的 Provider 后，插件会记录当前 Provider；Clien
 ## HTTP Routes
 GET  /api/dsh-account-models/accounts
 GET  /api/dsh-account-models/active-provider
-GET  /api/dsh-account-models/browser/view?accountId=...
 POST /api/dsh-account-models/accounts/add
 POST /api/dsh-account-models/accounts/open
 POST /api/dsh-account-models/accounts/check
