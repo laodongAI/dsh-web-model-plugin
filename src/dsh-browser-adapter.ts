@@ -120,7 +120,7 @@ export class DshBrowserAdapter extends LlmAdapter{
    if(code==='SERVICE_UNAVAILABLE'){
     throw new LlmError(`${providerName} 没有在规定时间内返回响应。请检查 DSH 右侧浏览器中的页面、网络和登录状态，修复后在 DSH Chat 重新发送。\n浏览器地址：${PROVIDER_MAP[selected].url}`,'UNAVAILABLE',{cause:error})
    }
-   const mapped=code==='RATE_LIMITED'?'RATE_LIMIT':code==='QUOTA_EXCEEDED'?'QUOTA_EXCEEDED':code==='SERVICE_UNAVAILABLE'?'UNAVAILABLE':'PROVIDER_ERROR'
+   const mapped=code==='RATE_LIMITED'?'RATE_LIMIT':code==='QUOTA_EXCEEDED'?'QUOTA_EXCEEDED':'PROVIDER_ERROR'
    throw error instanceof LlmError?error:new LlmError(`${providerName} Web AI 请求失败：${detail}` ,mapped,{cause:error})
   }
  }
