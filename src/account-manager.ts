@@ -103,6 +103,16 @@ export class AccountManager {
   }
  }
 
+ findByProvider(provider:AccountProvider){return this.store.list().find(a=>a.provider===provider)}
+
+ async ensureProvider(provider:AccountProvider){
+  const existing=this.findByProvider(provider)
+  if(existing){
+   if(!this.browser.isRunning(existing.id))await this.open(existing.id)
+   return this.snapshot(existing.id)!
+  }
+  return this.add(provider)
+ }
  getProvider(id:string){this.require(id);return this.providers.get(id)}
 
  async screenshot(id:string){
