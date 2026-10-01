@@ -47,12 +47,13 @@ DSH Agent Loop → web-ai → 选中的 Web AI Provider model → AccountProvide
 ## Provider / Browser
 模型选择器直接显示 DeepSeek、ChatGPT、Qwen、腾讯混元 AI Studio、豆包、Perplexity、Microsoft Copilot、HuggingChat、Kimi、智谱 AI。
 
-首次真正发送某个 Provider 的模型请求时，插件自动创建该 Provider 的浏览器账号记录并启动可见 Chromium；后续请求复用该 Provider 的持久 Profile。
+DSH 解析/执行选中的 Provider 后，插件会记录当前 Provider；Client 侧自动把对应 URL 打开到 DSH 原生 Right Sidebar Browser，并复用相同 URL 的 Browser Tab。用户可以直接在右侧完成登录、验证和人工调试。
 
-右侧 Sidebar 的原生 Browser 用于用户可见的登录、网页浏览和调试，并支持多 Tab。
+当前 0.2.3 仍有一个明确的运行时边界：Host 的 CDP 自动化浏览器与 DSH Right Sidebar 的 Electron `<webview>` 还不是同一个 guest。也就是说，0.2.3 已经实现“Provider 选择 → 右侧原生 Browser 自动打开”和“异常提示 → 用户右侧修复 → Chat 重试”，但尚未声称 Host 已经可以直接操作这个可见 webview。
 
 ## HTTP Routes
 GET  /api/dsh-account-models/accounts
+GET  /api/dsh-account-models/active-provider
 GET  /api/dsh-account-models/browser/view?accountId=...
 POST /api/dsh-account-models/accounts/add
 POST /api/dsh-account-models/accounts/open
@@ -76,13 +77,13 @@ pnpm typecheck
 pnpm build
 pnpm pack --pack-destination .\packed
 
-当前版本：dsh-account-models-0.2.2.tgz
+当前版本：dsh-account-models-0.2.3.tgz
 
 建议每次生成新的 tgz 后再安装，避免 DSH 插件管理器继续使用旧缓存包。
 
 ## DSH Desktop 安装
 完全退出 DSH Desktop 后执行：
-dsh.cmd plugin --profile desktop add .\packed\dsh-account-models-0.2.1.tgz
+dsh.cmd plugin --profile desktop add .\packed\dsh-account-models-0.2.3.tgz
 
 如之前安装过旧版本：
 dsh.cmd plugin --profile desktop remove dsh-account-models
@@ -102,13 +103,15 @@ dsh.cmd plugin --profile desktop remove dsh-account-models
 11. 手工切换网页 Conversation 后应返回 PAGE_CHANGED。
 12. Right Sidebar 的 Web AI 浏览器能够显示真实 Chromium 页面。
 
-## 当前边界
-右侧 Sidebar 的原生 Browser 与插件 Host 启动的 CDP Chromium 当前是两个浏览器载体：Sidebar Browser 负责用户可见的网页浏览、登录和调试；Host Chromium 负责稳定的 CDP/DOM 自动化。**因此当前版本不把左侧 Provider 做成独立栏，也不伪装成“右侧 Browser 已经可以被 Host CDP 控制”。** DSH 官方 Browser Tab 支持多实例、多 Tab，但当前公开插件契约没有把该 Electron webview 的 CDP attach 能力暴露给 Host 插件，因此本版本仍保留两个载体。
+## 当前边界与下一步
+DSH 官方 Right Sidebar Browser 在 Desktop 中使用 Electron `<webview>`，支持独立 Browser Tab 和持久页面；插件公开的 `DesktopBrowserBridge` 目前只提供 guest acquire/release/open-request 能力，没有向普通插件暴露 `webContents`、DOM、`executeJavaScript` 或 CDP attach。citeturn1view0
 
-下一阶段如果能获得稳定的 BrowserView/CDP attach seam，再把两者合并为真正的“右侧浏览器即自动化浏览器”。届时 Browser Workspace 应成为统一的浏览器运行时：用户在右侧打开网站/多 Tab，Agent 调试和 DOM 操作也针对当前 Tab；Provider 仍然只存在于 DSH 中间模型选择器，不新增左侧栏。在此之前，Provider 选择、持久登录态、CDP 自动化和右侧多 Tab UI 各自职责清晰。
+因此 0.2.3 不伪装“两个浏览器已经统一”。当前已经完成：Provider 只在 DSH 中间模型选择器出现；选中 Provider 后自动打开对应右侧 Browser；用户在右侧完成登录/验证；Host 请求失败时 DSH Chat 给出明确的右侧修复提示；用户修复后再次发送即可重新验证。
+
+下一阶段需要在 DSH Browser 正式增加 **Browser Automation Bridge**：由右侧 Browser Tab 自己持有 guest/webview，并向受控插件暴露 `currentTab`、`navigate`、`evaluate`、`waitForSelector`、`screenshot`、`sendInput` 等受限能力，再让本插件的 Host/Client 两侧通过该 Bridge 操作同一个 Browser Tab。这样才能真正达到“用户看到的右侧浏览器 = Agent 调试/DOM 操作的浏览器”。右侧 Browser 本身是 DSH 原生能力，不应再额外启动第二个可见浏览器。citeturn1view0turn1view1
 
 ## 安全边界
 本插件不保存密码、不提取 Cookie/Token、不调用目标站点私有 API、不重放浏览器 HTTP 请求、不绕过 CAPTCHA 或二次验证。
 
-当前版本：0.2.2
+当前版本：0.2.3
 目标：DSH 0.2.0-rc.2
