@@ -41,7 +41,7 @@ export async function connectTab(tab:CdpTab):Promise<CdpClient>{
   },
   async setFileInputFiles(selector:string,files:readonly string[]){
    await call('DOM.enable')
-   const root=await call('DOM.getDocument',{depth:1})
+   const root=await call('DOM.getDocument',{depth:-1})
    const node=await call('DOM.querySelector',{nodeId:root.root.nodeId,selector})
    if(!node?.nodeId)throw new Error('PAGE_CHANGED: 未找到浏览器文件上传控件')
    await call('DOM.setFileInputFiles',{nodeId:node.nodeId,files:[...files]})
