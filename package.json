@@ -1,6 +1,6 @@
 {
   "name": "dsh-account-models",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "description": "DSH 0.2.0-rc.2 browser-session accounts for DeepSeek, ChatGPT, Qwen and other Web AI providers",
   "type": "module",
   "main": "lib/index.js",
