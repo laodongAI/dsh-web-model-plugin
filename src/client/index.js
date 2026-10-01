@@ -12,6 +12,8 @@ let reconcileTimer
 let probeTimer
 let reconcileBusy=false
 let desiredSelection
+let lastOpenKey=''
+let lastOpenAt=0
 
 async function processBridgeRequest(){
  try{
@@ -101,9 +103,13 @@ function browserState(sessionId,provider){
  }
 }
 
-function openProviderBrowser(provider){
+function openProviderBrowser(ctx,provider){
+ const key=provider.id+'|'+provider.url
+ if(key===lastOpenKey&&Date.now()-lastOpenAt<2500)return false
  try{
   ctx.sidebarRight.openTab('browser',{params:{url:provider.url}})
+  lastOpenKey=key
+  lastOpenAt=Date.now()
   console.info('[dsh-account-models] browser action: open',provider.id,provider.url)
   return true
  }catch(error){
@@ -136,20 +142,20 @@ async function reconcileBrowser(){
   // 状态 1：右侧 Sidebar 未挂载/未展开。
   // openTab 是 DSH 官方入口；它负责把 Browser tab 放入当前右侧工作区。
   if(!sidebar.mounted||!sidebar.expanded){
-   openProviderBrowser(provider)
+   openProviderBrowser(ctx,provider)
    return
   }
 
   // 状态 2：右侧已经展开，但没有 Browser。
   if(browser.count===0){
-   openProviderBrowser(provider)
+   openProviderBrowser(ctx,provider)
    return
   }
 
   // 状态 3：已有 Browser，但当前页面不是所选 Web AI Provider。
   // 不抢用户原有 tab；新建一个目标 Provider tab，保留 DSH 的多 tab 能力。
   if(!browser.matching){
-   openProviderBrowser(provider)
+   openProviderBrowser(ctx,provider)
    return
   }
 
