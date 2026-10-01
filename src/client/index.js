@@ -14,6 +14,9 @@ let reconcileBusy=false
 let desiredSelection
 let lastOpenKey=''
 let lastOpenAt=0
+let lastProbeKey=''
+let lastProbeAt=0
+let probeBusy=false
 
 async function processBridgeRequest(){
  try{
@@ -122,6 +125,37 @@ function cssEscape(value){
  return String(value).replace(/\\/g,'\\\\').replace(/"/g,'\\"')
 }
 
+async function probeProvider(provider){
+ const key=provider.id+'|'+provider.url
+ if(probeBusy)return
+ if(key===lastProbeKey&&Date.now()-lastProbeAt<PROBE_RETRY_MS)return
+ probeBusy=true
+ lastProbeKey=key
+ lastProbeAt=Date.now()
+ try{
+  const response=await fetch('/api/dsh-account-models/browser/check',{
+   method:'POST',
+   headers:{'content-type':'application/json'},
+   body:JSON.stringify({provider:provider.id})
+  })
+  const result=await response.json()
+  if(response.ok){
+   console.info('[dsh-account-models] chat probe:',JSON.stringify(result))
+   if(result.status!=='ready'){
+    lastProbeAt=Date.now()-PROBE_RETRY_MS
+   }
+  }else{
+   console.warn('[dsh-account-models] chat probe failed:',result)
+   lastProbeAt=Date.now()-PROBE_RETRY_MS
+  }
+ }catch(error){
+  console.warn('[dsh-account-models] chat probe request failed:',error)
+  lastProbeAt=Date.now()-PROBE_RETRY_MS
+ }finally{
+  probeBusy=false
+ }
+}
+
 async function reconcileBrowser(){
  if(reconcileBusy||!desiredSelection)return
  reconcileBusy=true
@@ -162,6 +196,7 @@ async function reconcileBrowser(){
   // 状态 4：目标 Provider 页面已经存在。
   // 不重复打开、不强制导航；交给 Host adapter 进行页面健康/登录/会话检测。
   console.info('[dsh-account-models] browser action: ready candidate',provider.id)
+  probeProvider(provider).catch(error=>console.warn('[dsh-account-models] probe failed:',error))
  }finally{
   reconcileBusy=false
  }
