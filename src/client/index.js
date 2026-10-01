@@ -58,42 +58,43 @@ function providerHost(provider,url){
 
 function apply(ctx){
  console.info('[dsh-account-models] client active: native model selector + right browser workspace')
- const syncSelection=()=>{
+ let unsubscribeSelection=()=>{}
+ let unsubscribeMounted=()=>{}
+ const bindSelection=(modelDirectories)=>{
+  unsubscribeSelection()
+  unsubscribeSelection=()=>{}
   try{
    const sessionId=ctx.sidebarRight.mounted.getSnapshot()
    if(!sessionId)return
-   const directory=ctx.modelDirectories.directoryFor(sessionId)
+   const directory=modelDirectories.directoryFor(sessionId)
    const update=()=>{
     const selection=directory.store.getSnapshot().current
-    if(!selection)return
-    if(selection.provider!=='web-ai')return
+    if(!selection||selection.provider!=='web-ai')return
     const item=PROVIDERS.find(([id])=>id===selection.model)
     if(!item)return
     const [,providerName,url]=item
-    const key=selection.model+'|'+url
+    const key=selection.provider+'|'+selection.model+'|'+url
     if(apply.lastKey===key)return
     apply.lastKey=key
     try{
      ctx.sidebarRight.openTab('browser',{params:{url}})
-     console.info('[dsh-account-models] opened native Browser for selected provider:',providerName)
+     console.info('[dsh-account-models] opened native Browser for selected provider:',providerName,url)
     }catch(error){
      console.warn('[dsh-account-models] DSH Browser tab unavailable:',error)
     }
    }
-   const unsubscribe=directory.store.subscribe(update)
+   unsubscribeSelection=directory.store.subscribe(update)
    update()
-   return unsubscribe
   }catch(error){
    console.warn('[dsh-account-models] model selection sync unavailable:',error)
   }
  }
- let unsubscribeSelection=()=>{}
- const bindSelection=()=>{
-  unsubscribeSelection()
-  unsubscribeSelection=syncSelection()??(()=>{})
- }
- bindSelection()
- const unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(bindSelection)
+ ctx.inject(['modelDirectories'],(scope)=>{
+  const modelDirectories=scope.modelDirectories
+  const bind=()=>bindSelection(modelDirectories)
+  bind()
+  unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(bind)
+ })
  bridgeTimer=setInterval(processBridgeRequest,BRIDGE_POLL_MS)
  ctx.effect(()=>()=>{
   unsubscribeSelection()
