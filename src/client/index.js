@@ -4,19 +4,19 @@ const PROVIDERS=[
  ['copilot','Microsoft Copilot','https://copilot.microsoft.com/'],['huggingchat','HuggingChat','https://huggingface.co/chat/'],['kimi','Kimi','https://kimi.moonshot.cn/'],['chatglm','智谱 AI','https://chatglm.cn/'],
 ]
 
-const RECONCILE_MS=250
-const PROBE_AFTER_OPEN_MS=1500
-const PROBE_RETRY_MS=3000
+const RECONCILE_MS=500
+const BRIDGE_WAIT_MS=30000
 let bridgeTimer
 let reconcileTimer
-let probeTimer
 let reconcileBusy=false
 let desiredSelection
+let modelDirectories
+let unsubscribeSelection=()=>{}
+let unsubscribeMounted=()=>{}
+let unsubscribeAgentStatus=()=>{}
+let unsubscribeAssistantStream=()=>{}
 let lastOpenKey=''
 let lastOpenAt=0
-let lastProbeKey=''
-let lastProbeAt=0
-let probeBusy=false
 
 async function processBridgeRequest(){
  try{
@@ -24,9 +24,9 @@ async function processBridgeRequest(){
   if(!response.ok)return
   const request=await response.json()
   if(!request.id||!request.provider||!request.expression)return
-  const frame=await waitForProviderFrame(request.provider,12000)
+  const frame=await waitForProviderFrame(request.provider,BRIDGE_WAIT_MS)
   if(!frame){
-   await bridgeResult(request.id,false,undefined,'PAGE_CHANGED: DSH 右侧 Browser 在限定时间内没有建立当前 Provider 页面')
+   await bridgeResult(request.id,false,undefined,'BROWSER_NOT_READY: DSH 右侧 Browser 尚未建立当前 Provider 页面')
    return
   }
   try{
@@ -90,18 +90,35 @@ function selectedProvider(selection){
  return {id:item[0],name:item[1],url:item[2]}
 }
 
-function rightSidebarState(sessionId){
- const root=document.querySelector(`[data-sidebar-right-session="${cssEscape(sessionId)}"]`)
- if(!root)return {mounted:false,expanded:false}
- return {
-  mounted:true,
-  expanded:root.querySelector('[data-sidebar-right-panel][data-sidebar-right-open]')!==null
+function currentSelection(ctx){
+ const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+ if(!sessionId||!modelDirectories)return {sessionId,provider:undefined}
+ try{
+  const directory=modelDirectories.directoryFor(sessionId)
+  const selection=directory.store.getSnapshot().current
+  const provider=selectedProvider(selection)
+  desiredSelection=provider
+  return {sessionId,provider}
+ }catch(error){
+  console.warn('[dsh-account-models] current model selection unavailable:',error)
+  return {sessionId,provider:undefined}
  }
 }
 
-function browserState(sessionId,provider){
- const scope=document.querySelector(`[data-sidebar-right-session="${cssEscape(sessionId)}"]:not([hidden])`)??document
- const frames=[...scope.querySelectorAll('webview[data-sidebar-browser-frame], iframe[data-sidebar-browser-frame]')]
+function rightSidebarState(ctx){
+ const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+ if(!sessionId)return {mounted:false,expanded:false}
+ try{
+  return {mounted:true,expanded:ctx.sidebarRight.isExpanded()}
+ }catch(error){
+  console.warn('[dsh-account-models] sidebar state unavailable:',error)
+  return {mounted:true,expanded:false}
+ }
+}
+
+function browserState(ctx,sessionId,provider){
+ const openTabs=ctx.sidebarRight.openTabs.getSnapshot().filter(tab=>tab.sessionId===sessionId&&tab.kind==='browser')
+ const frames=[...document.querySelectorAll('webview[data-sidebar-browser-frame], iframe[data-sidebar-browser-frame]')]
  const urls=frames.map(frame=>{
   try{
    if(typeof frame.getURL==='function')return frame.getURL()||''
@@ -109,10 +126,12 @@ function browserState(sessionId,provider){
   }catch{}
   return ''
  })
+ const matching=urls.some(url=>providerHost(provider,url))
  return {
-  count:frames.length,
-  matching:urls.some(url=>providerHost(provider,url)),
-  urls
+  count:openTabs.length,
+  matching,
+  urls,
+  tabIds:openTabs.map(tab=>tab.tabId)
  }
 }
 
@@ -120,7 +139,10 @@ function openProviderBrowser(ctx,provider){
  const key=provider.id+'|'+provider.url
  if(key===lastOpenKey&&Date.now()-lastOpenAt<2500)return false
  try{
-  ctx.sidebarRight.openTab('browser',{params:{url:provider.url}})
+  // Browser 是 multi-instance。使用 revealIfOpened:false，避免当前只是 guide/start
+  // 页时被同一个 browser kind 的地址去重规则拦住；这也是 DSH 原生 Browser
+  // 自己用于“新建 Browser tab”的正式方式。
+  ctx.sidebarRight.openTab('browser',{params:{url:provider.url},revealIfOpened:false})
   lastOpenKey=key
   lastOpenAt=Date.now()
   console.info('[dsh-account-models] browser action: open',provider.id,provider.url)
@@ -131,134 +153,113 @@ function openProviderBrowser(ctx,provider){
  }
 }
 
-function cssEscape(value){
- return String(value).replace(/\\/g,'\\\\').replace(/"/g,'\\"')
-}
-
-async function probeProvider(provider){
- const key=provider.id+'|'+provider.url
- if(probeBusy)return
- if(key===lastProbeKey&&Date.now()-lastProbeAt<PROBE_RETRY_MS)return
- probeBusy=true
- lastProbeKey=key
- lastProbeAt=Date.now()
- try{
-  const response=await fetch('/api/dsh-account-models/browser/check',{
-   method:'POST',
-   headers:{'content-type':'application/json'},
-   body:JSON.stringify({provider:provider.id})
-  })
-  const result=await response.json()
-  if(response.ok){
-   console.info('[dsh-account-models] chat probe:',JSON.stringify(result))
-   if(result.status!=='ready'){
-    lastProbeAt=Date.now()-PROBE_RETRY_MS
-   }
-  }else{
-   console.warn('[dsh-account-models] chat probe failed:',result)
-   lastProbeAt=Date.now()-PROBE_RETRY_MS
-  }
- }catch(error){
-  console.warn('[dsh-account-models] chat probe request failed:',error)
-  lastProbeAt=Date.now()-PROBE_RETRY_MS
- }finally{
-  probeBusy=false
- }
-}
-
-async function reconcileBrowser(ctx){
- if(reconcileBusy||!desiredSelection)return
+async function reconcileBrowser(ctx,reason='poll'){
+ if(reconcileBusy)return
  reconcileBusy=true
  try{
-  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
-  if(!sessionId)return
+  const {sessionId,provider}=currentSelection(ctx)
+  if(!sessionId||!provider)return
 
-  const provider=desiredSelection
-  const sidebar=rightSidebarState(sessionId)
-  const browser=browserState(sessionId,provider.id)
-
+  const sidebar=rightSidebarState(ctx)
+  const browser=browserState(ctx,sessionId,provider.id)
   console.info('[dsh-account-models] state:',JSON.stringify({
+   reason,
    provider:provider.id,
    sidebar,
    browser
   }))
 
-  // 状态 1：右侧 Sidebar 未挂载/未展开。
-  // openTab 是 DSH 官方入口；它负责把 Browser tab 放入当前右侧工作区。
-  if(!sidebar.mounted||!sidebar.expanded){
+  // 状态 1：没有当前 Session 的右侧 Sidebar。
+  // openTab 会在 Session 可用时直接作用于当前会话；这里先等待 mounted。
+  if(!sidebar.mounted)return
+
+  // 状态 2：Sidebar 未展开。
+  // DSH 官方 openTab 会在打开 Browser 的同时展开右栏。
+  if(!sidebar.expanded){
    openProviderBrowser(ctx,provider)
    return
   }
 
-  // 状态 2：右侧已经展开，但没有 Browser。
+  // 状态 3：Sidebar 已展开，但没有 Browser tab。
   if(browser.count===0){
    openProviderBrowser(ctx,provider)
    return
   }
 
-  // 状态 3：已有 Browser，但当前页面不是所选 Web AI Provider。
-  // 不抢用户原有 tab；新建一个目标 Provider tab，保留 DSH 的多 tab 能力。
+  // 状态 4：已有 Browser，但没有当前 Provider 页面。
+  // 不抢占用户已有页面；创建一个新的原生 Browser 实例承载目标 Provider。
   if(!browser.matching){
    openProviderBrowser(ctx,provider)
    return
   }
 
-  // 状态 4：目标 Provider 页面已经存在。
-  // 不重复打开、不强制导航；交给 Host adapter 进行页面健康/登录/会话检测。
-  console.info('[dsh-account-models] browser action: ready candidate',provider.id)
-  probeProvider(provider).catch(error=>console.warn('[dsh-account-models] probe failed:',error))
+  // 状态 5：目标 Provider 页面存在。
+  // 不强制导航；每次 Chat 的 Host adapter 会再次做 health() 校验。
+  console.info('[dsh-account-models] browser action: matching provider page found',provider.id)
  }finally{
   reconcileBusy=false
  }
 }
 
-function startProbe(){
- clearTimeout(probeTimer)
- probeTimer=setTimeout(()=>{
-  reconcileBrowser(ctx).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
- },PROBE_AFTER_OPEN_MS)
+function triggerReconcile(ctx,reason){
+ reconcileBrowser(ctx,reason).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+}
+
+function bindSelection(ctx){
+ unsubscribeSelection()
+ unsubscribeSelection=()=>{}
+ if(!modelDirectories)return
+ try{
+  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+  if(!sessionId)return
+  const directory=modelDirectories.directoryFor(sessionId)
+  const update=()=>{
+   const selection=directory.store.getSnapshot().current
+   const next=selectedProvider(selection)
+   desiredSelection=next
+   if(!next)return
+   console.info('[dsh-account-models] selected Web AI provider:',next.id,next.url)
+   triggerReconcile(ctx,'model-selection')
+  }
+  unsubscribeSelection=directory.store.subscribe(update)
+  update()
+ }catch(error){
+  console.warn('[dsh-account-models] model selection sync unavailable:',error)
+ }
 }
 
 function apply(ctx){
  console.info('[dsh-account-models] client active: native model selector + browser state reconciler')
- let unsubscribeSelection=()=>{}
- let unsubscribeMounted=()=>{}
 
- const bindSelection=(modelDirectories)=>{
-  unsubscribeSelection()
-  unsubscribeSelection=()=>{}
-  try{
-   const sessionId=ctx.sidebarRight.mounted.getSnapshot()
-   if(!sessionId)return
-   const directory=modelDirectories.directoryFor(sessionId)
-   const update=()=>{
-    const selection=directory.store.getSnapshot().current
-    const next=selectedProvider(selection)
-    desiredSelection=next
-    if(!next)return
-    console.info('[dsh-account-models] selected Web AI provider:',next.id,next.url)
-    reconcileBrowser(ctx).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
-    startProbe()
-   }
-   unsubscribeSelection=directory.store.subscribe(update)
-   update()
-  }catch(error){
-   console.warn('[dsh-account-models] model selection sync unavailable:',error)
-  }
- }
+ ctx.inject(['modelDirectories'],scope=>{
+  modelDirectories=scope.modelDirectories
+  bindSelection(ctx)
 
- ctx.inject(['modelDirectories'],(scope)=>{
-  const modelDirectories=scope.modelDirectories
-  const bind=()=>bindSelection(modelDirectories)
-  bind()
   unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(()=>{
-   bind()
-   if(desiredSelection)reconcileBrowser(ctx).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+   bindSelection(ctx)
+   triggerReconcile(ctx,'session-mounted')
+  })
+
+  // 每次真正进入 Chat 运行态都重新校验一次浏览器状态。
+  // 这是“每次 Chat 必校验”的第一道客户端闸门，不依赖用户是否刚切换过模型。
+  unsubscribeAgentStatus=ctx.on('agent/status',({agent,status})=>{
+   if(status!=='running')return
+   const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+   if(agent?.id!==sessionId)return
+   triggerReconcile(ctx,'chat-start')
+  })
+
+  // assistant-stream start 与 status:running 都可能先后到达；两处都触发是幂等的。
+  unsubscribeAssistantStream=ctx.on('agent/assistant-stream',({agent,frame})=>{
+   if(frame?.type!=='start')return
+   const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+   if(agent?.id!==sessionId)return
+   triggerReconcile(ctx,'assistant-stream-start')
   })
  })
 
  reconcileTimer=setInterval(()=>{
-  if(desiredSelection)reconcileBrowser(ctx).catch(error=>console.warn('[dsh-account-models] reconcile failed:',error))
+  if(desiredSelection)triggerReconcile(ctx,'poll')
  },RECONCILE_MS)
 
  bridgeTimer=setInterval(processBridgeRequest,120)
@@ -266,10 +267,12 @@ function apply(ctx){
  ctx.effect(()=>()=>{
   unsubscribeSelection()
   unsubscribeMounted()
+  unsubscribeAgentStatus()
+  unsubscribeAssistantStream()
   clearInterval(reconcileTimer)
   clearInterval(bridgeTimer)
-  clearTimeout(probeTimer)
   desiredSelection=undefined
+  modelDirectories=undefined
  },'dsh-account-models: browser state reconciler')
 }
 
