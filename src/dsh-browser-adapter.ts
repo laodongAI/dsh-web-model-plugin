@@ -45,7 +45,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   })
  }
 
- override async resolveModel(provider:string,model:string,signal?:AbortSignal):P override async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
+ override async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo>{
   if(signal?.aborted)throw signal.reason??new Error('请求已取消')
   if(provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${provider}`,'MODEL_UNAVAILABLE')
   const selected=providerOfModel(model)
