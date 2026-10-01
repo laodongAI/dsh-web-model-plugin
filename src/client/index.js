@@ -252,31 +252,37 @@ function bindSelection(ctx){
 function apply(ctx){
  console.info('[dsh-account-models] client active: native model selector + browser state reconciler')
 
- ctx.inject(['modelDirectories'],scope=>{
-  modelDirectories=scope.modelDirectories
+ modelDirectories=ctx.modelDirectories
+ if(!modelDirectories||!ctx.sidebarRight){
+  console.warn('[dsh-account-models] required client services unavailable:',{
+   modelDirectories:Boolean(modelDirectories),
+   sidebarRight:Boolean(ctx.sidebarRight)
+  })
+  return
+ }
+
+ bindSelection(ctx)
+
+ unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(()=>{
   bindSelection(ctx)
+  triggerReconcile(ctx,'session-mounted')
+ })
 
-  unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(()=>{
-   bindSelection(ctx)
-   triggerReconcile(ctx,'session-mounted')
-  })
+ // 每次真正进入 Chat 运行态都重新校验一次浏览器状态。
+ // 这是“每次 Chat 必校验”的第一道客户端闸门，不依赖用户是否刚切换过模型。
+ unsubscribeAgentStatus=ctx.on('agent/status',({agent,status})=>{
+  if(status!=='running')return
+  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+  if(agent?.id!==sessionId)return
+  triggerReconcile(ctx,'chat-start')
+ })
 
-  // 每次真正进入 Chat 运行态都重新校验一次浏览器状态。
-  // 这是“每次 Chat 必校验”的第一道客户端闸门，不依赖用户是否刚切换过模型。
-  unsubscribeAgentStatus=ctx.on('agent/status',({agent,status})=>{
-   if(status!=='running')return
-   const sessionId=ctx.sidebarRight.mounted.getSnapshot()
-   if(agent?.id!==sessionId)return
-   triggerReconcile(ctx,'chat-start')
-  })
-
-  // assistant-stream start 与 status:running 都可能先后到达；两处都触发是幂等的。
-  unsubscribeAssistantStream=ctx.on('agent/assistant-stream',({agent,frame})=>{
-   if(frame?.type!=='start')return
-   const sessionId=ctx.sidebarRight.mounted.getSnapshot()
-   if(agent?.id!==sessionId)return
-   triggerReconcile(ctx,'assistant-stream-start')
-  })
+ // assistant-stream start 与 status:running 都可能先后到达；两处都触发是幂等的。
+ unsubscribeAssistantStream=ctx.on('agent/assistant-stream',({agent,frame})=>{
+  if(frame?.type!=='start')return
+  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+  if(agent?.id!==sessionId)return
+  triggerReconcile(ctx,'assistant-stream-start')
  })
 
  reconcileTimer=setInterval(()=>{
