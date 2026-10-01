@@ -53,6 +53,17 @@ export class AccountManager {
   return this.snapshot(id)!
  }
 
+ async checkProvider(provider:AccountProvider){
+  const account=await this.ensureProvider(provider)
+  const adapter=this.providers.get(account.id)
+  if(!adapter)throw new Error('Provider 未初始化')
+  const health=await adapter.health()
+  const status=health.status
+  const snapshot=this.snapshot(account.id)
+  if(snapshot)await this.store.upsert({...snapshot,status:status==='ready'?'ready':status==='login_required'?'login_required':'unknown',updatedAt:new Date().toISOString(),lastError:health.message})
+  return {provider,status,ready:status==='ready',message:health.message??null,accountId:account.id,url:health.state.url}
+ }
+
  async checkReady(id:string){
   const a=this.require(id)
   if(!this.providers.has(id))await this.open(id)
