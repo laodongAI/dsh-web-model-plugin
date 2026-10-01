@@ -90,13 +90,6 @@ export class AccountManager {
  }
  getProvider(id:string){this.require(id);return this.providers.get(id)}
 
- async screenshot(id:string){
-  const a=this.require(id)
-  if(!this.providers.has(id))await this.open(id)
-  const p=this.providers.get(id)
-  if(!p)throw new Error('Provider 未初始化')
-  return p.screenshot()
- }
 
  snapshot(id:string){
   const a=this.store.get(id)
