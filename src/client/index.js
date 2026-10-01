@@ -6,15 +6,14 @@ const PROVIDERS=[
 
 const BRIDGE_WAIT_MS=12000
 let bridgeTimer
-let desiredSelection
 let modelDirectories
-let openedProviderKeys=new Set()
+let currentProviderBySession=new Map()
+let reconcilePromiseBySession=new Map()
 let unsubscribeSelection=()=>{}
 let unsubscribeMounted=()=>{}
 let unsubscribeAgentStatus=()=>{}
 let unsubscribeAssistantStream=()=>{}
-// Cordis Client 服务依赖：apply() 内所有 sidebar/modelDirectory 访问都必须声明注入。
-// 否则 ctx.sidebarRight / modelDirectories 在运行时不可读，状态协调器会静默失效。
+
 const inject=['modelDirectories','sidebarRight']
 
 async function processBridgeRequest(){
@@ -44,10 +43,7 @@ async function waitForProviderFrame(provider,timeoutMs){
    try{return typeof frame.getURL==='function'}catch{return false}
   })
   const candidates=frames.filter(frame=>{
-   try{
-    const url=frame.getURL?.()||''
-    return typeof url==='string' && providerHost(provider,url)
-   }catch{return false}
+   try{return providerHost(provider,frame.getURL?.()||'')}catch{return false}
   })
   const frame=candidates.at(-1)
   if(frame)return frame
@@ -91,116 +87,135 @@ function selectedProvider(selection){
  return {id:item[0],name:item[1],url:item[2]}
 }
 
+function getSessionId(ctx){
+ try{return ctx.sidebarRight.mounted.getSnapshot()}catch{return undefined}
+}
+
 function currentSelection(ctx){
- const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+ const sessionId=getSessionId(ctx)
  if(!sessionId||!modelDirectories)return {sessionId,provider:undefined}
  try{
   const directory=modelDirectories.directoryFor(sessionId)
-  const selection=directory.store.getSnapshot().current
-  const provider=selectedProvider(selection)
-  desiredSelection=provider
-  return {sessionId,provider}
+  return {sessionId,provider:selectedProvider(directory.store.getSnapshot().current)}
  }catch(error){
   console.warn('[dsh-account-models] current model selection unavailable:',error)
   return {sessionId,provider:undefined}
  }
 }
 
-function rightSidebarState(ctx){
- const sessionId=ctx.sidebarRight.mounted.getSnapshot()
- if(!sessionId)return {mounted:false,expanded:false}
- try{
-  return {mounted:true,expanded:typeof ctx.sidebarRight.isExpanded==='function' ? ctx.sidebarRight.isExpanded() : true}
- }catch(error){
-  console.warn('[dsh-account-models] sidebar state unavailable:',error)
-  return {mounted:true,expanded:false}
- }
+function browserTabs(ctx,sessionId){
+ return (ctx.sidebarRight.openTabs?.getSnapshot?.()??[])
+  .filter(tab=>tab.sessionId===sessionId&&tab.kind==='browser')
 }
 
-function browserState(ctx,sessionId,provider){
- const openTabs=(ctx.sidebarRight.openTabs?.getSnapshot?.()??[]).filter(tab=>tab.sessionId===sessionId&&tab.kind==='browser')
- const frames=[...document.querySelectorAll('webview, iframe')].filter(frame=>{
-  try{
-   if(typeof frame.getURL==='function')return true
-   return frame instanceof HTMLIFrameElement
-  }catch{return false}
- })
- const urls=frames.map(frame=>{
+function browserFrames(){
+ return [...document.querySelectorAll('webview, iframe')]
+}
+
+function currentBrowserUrls(){
+ return browserFrames().map(frame=>{
   try{
    if(typeof frame.getURL==='function')return frame.getURL()||''
    if(frame instanceof HTMLIFrameElement)return frame.src||''
   }catch{}
   return ''
- })
- const knownUrls=urls.filter(Boolean)
- const matching=knownUrls.some(url=>providerHost(provider,url))
- const loading=openTabs.length>0&&knownUrls.length===0
- return {
-  count:openTabs.length,
-  matching,
-  loading,
-  urls,
-  tabIds:openTabs.map(tab=>tab.tabId)
+ }).filter(Boolean)
+}
+
+function hasMatchingProviderTab(ctx,sessionId,provider){
+ const tabs=browserTabs(ctx,sessionId)
+ const urls=currentBrowserUrls()
+ const matching=urls.some(url=>providerHost(provider.id,url))
+ return {tabs,urls,matching}
+}
+
+function safeClose(ctx,tabId){
+ try{
+  if(tabId==null)return
+  if(typeof ctx.sidebarRight.close==='function')ctx.sidebarRight.close(tabId)
+ }catch(error){
+  console.warn('[dsh-account-models] browser tab close failed:',tabId,error)
  }
+}
+
+function closeProviderTabs(ctx,sessionId){
+ for(const tab of browserTabs(ctx,sessionId))safeClose(ctx,tab.tabId)
 }
 
 function openProviderBrowser(ctx,provider,sessionId){
- const key=sessionId+'|'+provider.id+'|'+provider.url
- // 一个 Session + 一个 Provider 只允许执行一次系统 openTab。
- // 打开之后进入纯观察模式：不因加载、登录、页面变化或 Sidebar 状态再次创建 Tab。
- if(openedProviderKeys.has(key)){
-  console.info('[dsh-account-models] browser action: already opened, wait for manual operation',provider.id)
-  return false
- }
  try{
   ctx.sidebarRight.openTab('browser',{params:{url:provider.url}})
-  openedProviderKeys.add(key)
-  console.info('[dsh-account-models] browser action: open once, then wait for manual operation',provider.id,provider.url)
+  console.info('[dsh-account-models] browser action: open provider page',provider.id,provider.url)
   return true
  }catch(error){
-  console.warn('[dsh-account-models] browser action failed:',error)
+  console.warn('[dsh-account-models] browser action failed:',provider.id,error)
   return false
  }
 }
+
 async function reconcileBrowser(ctx,reason='observe'){
  const {sessionId,provider}=currentSelection(ctx)
- if(!sessionId||!provider)return
+ if(!sessionId||!provider)return {opened:false,matching:false,provider}
 
- const sidebar=rightSidebarState(ctx)
- const browser=browserState(ctx,sessionId,provider.id)
- console.info('[dsh-account-models] state:',JSON.stringify({
-  reason,
-  provider:provider.id,
-  sidebar,
-  browser
+ const sidebarMounted=Boolean(getSessionId(ctx))
+ if(!sidebarMounted)return {opened:false,matching:false,provider}
+
+ const state=hasMatchingProviderTab(ctx,sessionId,provider)
+ console.info('[dsh-account-models] browser state:',JSON.stringify({
+  reason,sessionId,provider:provider.id,tabCount:state.tabs.length,matching:state.matching,urls:state.urls
  }))
 
- // 系统只负责首次打开 Provider 页面；之后完全交给人工处理页面。
- // 不再根据 loading/matching/count/sidebar 状态调用 openTab。
- if(!openedProviderKeys.has(sessionId+'|'+provider.id+'|'+provider.url)){
-  if(!sidebar.mounted)return
-  openProviderBrowser(ctx,provider,sessionId)
-  return
- }
+ if(state.matching)return {opened:false,matching:true,provider}
 
- console.info('[dsh-account-models] browser action: observe only; manual operation owns page state',provider.id)
+ // 没有与当前 Web AI Provider 匹配的 Browser：
+ // 1) 关闭当前会话残留的旧 Browser Tab；
+ // 2) 重新打开当前 Provider 初始地址；
+ // 3) 打开后不再自动导航/登录/切换模型，后续完全交给人工。
+ if(state.tabs.length)closeProviderTabs(ctx,sessionId)
+ const opened=openProviderBrowser(ctx,provider,sessionId)
+ return {opened,matching:false,provider}
+}
+
+function triggerReconcile(ctx,reason){
+ const sessionId=getSessionId(ctx)
+ if(!sessionId)return Promise.resolve()
+ const running=reconcilePromiseBySession.get(sessionId)
+ if(running)return running
+ const task=Promise.resolve().then(()=>reconcileBrowser(ctx,reason)).catch(error=>{
+  console.warn('[dsh-account-models] browser reconcile failed:',reason,error)
+  return undefined
+ }).finally(()=>reconcilePromiseBySession.delete(sessionId))
+ reconcilePromiseBySession.set(sessionId,task)
+ return task
 }
 
 function bindSelection(ctx){
  unsubscribeSelection()
  unsubscribeSelection=()=>{}
- if(!modelDirectories)return
+ const sessionId=getSessionId(ctx)
+ if(!modelDirectories||!sessionId)return
  try{
-  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
-  if(!sessionId)return
   const directory=modelDirectories.directoryFor(sessionId)
   const update=()=>{
-   const selection=directory.store.getSnapshot().current
-   const next=selectedProvider(selection)
-   desiredSelection=next
-   if(!next)return
-   console.info('[dsh-account-models] selected Web AI provider:',next.id,next.url)
-   triggerReconcile(ctx,'model-selection')
+   const next=selectedProvider(directory.store.getSnapshot().current)
+   const previous=currentProviderBySession.get(sessionId)
+   currentProviderBySession.set(sessionId,next?.id)
+
+   if(!next){
+    if(previous){
+     console.info('[dsh-account-models] switched away from Web AI; closing previous Browser tabs',previous)
+     closeProviderTabs(ctx,sessionId)
+    }
+    return
+   }
+
+   if(previous&&previous!==next.id){
+    console.info('[dsh-account-models] Web AI model switched:',previous,'=>',next.id)
+    closeProviderTabs(ctx,sessionId)
+   }
+
+   // 首次选择 Web AI、或切换 Web AI Provider，立即确保对应 Browser Tab 存在。
+   triggerReconcile(ctx,previous?'model-switch':'model-selection')
   }
   unsubscribeSelection=directory.store.subscribe(update)
   update()
@@ -210,9 +225,9 @@ function bindSelection(ctx){
 }
 
 function apply(ctx){
- console.info('[dsh-account-models] client active: native model selector + browser state reconciler')
-
+ console.info('[dsh-account-models] client active: Web AI Browser lifecycle controller')
  modelDirectories=ctx.modelDirectories
+
  if(!modelDirectories||!ctx.sidebarRight){
   console.warn('[dsh-account-models] required client services unavailable:',{
    modelDirectories:Boolean(modelDirectories),
@@ -224,23 +239,26 @@ function apply(ctx){
  bindSelection(ctx)
 
  unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(()=>{
-  bindSelection(ctx)
-  triggerReconcile(ctx,'session-mounted')
+  const sessionId=getSessionId(ctx)
+  if(sessionId){
+   currentProviderBySession.delete(sessionId)
+   bindSelection(ctx)
+   triggerReconcile(ctx,'session-mounted')
+  }
  })
 
- // 每次真正进入 Chat 运行态都重新校验一次浏览器状态。
- // 这是“每次 Chat 必校验”的第一道客户端闸门，不依赖用户是否刚切换过模型。
+ // DSH 首次进入 Chat 且当前模型为 Web AI：必须检查当前 Provider Browser。
+ // 如果不存在匹配地址，自动打开；如果已存在，则不重复创建。
  unsubscribeAgentStatus=ctx.on('agent/status',({agent,status})=>{
   if(status!=='running')return
-  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+  const sessionId=getSessionId(ctx)
   if(agent?.id!==sessionId)return
   triggerReconcile(ctx,'chat-start')
  })
 
- // assistant-stream start 与 status:running 都可能先后到达；两处都触发是幂等的。
  unsubscribeAssistantStream=ctx.on('agent/assistant-stream',({agent,frame})=>{
   if(frame?.type!=='start')return
-  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+  const sessionId=getSessionId(ctx)
   if(agent?.id!==sessionId)return
   triggerReconcile(ctx,'assistant-stream-start')
  })
@@ -252,12 +270,11 @@ function apply(ctx){
   unsubscribeMounted()
   unsubscribeAgentStatus()
   unsubscribeAssistantStream()
-  clearInterval(reconcileTimer)
   clearInterval(bridgeTimer)
-  desiredSelection=undefined
+  currentProviderBySession.clear()
+  reconcilePromiseBySession.clear()
   modelDirectories=undefined
-  openedProviderKeys.clear()
- },'dsh-account-models: browser state reconciler')
+ },'dsh-account-models: browser lifecycle controller')
 }
 
 apply.lastKey=''
