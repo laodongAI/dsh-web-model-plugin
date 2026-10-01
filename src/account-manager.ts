@@ -6,46 +6,21 @@ import {BrowserManager,type BrowserManagerConfig} from './browser-manager.js'
 import type {AccountProvider,AccountSnapshot} from './types.js'
 import {DefaultBrowserProvider} from './providers/browser-provider.js'
 import type {WebPageTiming} from './providers/web-page.js'
-import {WebAiConfigStore} from './web-ai-config.js'
 import {PROVIDER_MAP} from './provider-catalog.js'
 
 export class AccountManager {
  readonly rootDir=join(homedir(),'.dsh','account-models')
  private store=new AccountStore(this.rootDir)
  private browser:BrowserManager
- private configStore=new WebAiConfigStore(this.rootDir)
  private providers=new Map<string,DefaultBrowserProvider>()
 
  constructor(browserConfig:BrowserManagerConfig={cdpReadyTimeoutMs:20000},private readonly pageTiming:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){
   this.browser=new BrowserManager(browserConfig)
  }
 
- async init(){await this.store.load();await this.configStore.load()}
+ async init(){await this.store.load()}
 
  list():AccountSnapshot[]{return this.store.list().map(a=>({...a,browserRunning:this.browser.isRunning(a.id)}))}
-
- getConfig(){return this.configStore.get()}
-
- async setConfig(value:Pick<ReturnType<WebAiConfigStore['get']>,'defaultProvider'|'defaultAccountId'>){
-  if(value.defaultAccountId){
-   const account=this.store.get(value.defaultAccountId)
-   if(!account)throw new Error('默认 Web AI 账号不存在')
-   if(value.defaultProvider&&account.provider!==value.defaultProvider)throw new Error('默认 Provider 与账号不匹配')
-  }
-  if(value.defaultProvider&&!value.defaultAccountId){
-   const account=this.store.list().find(a=>a.provider===value.defaultProvider)
-   if(!account)throw new Error('该 Provider 尚未添加浏览器账号')
-   value={...value,defaultAccountId:account.id}
-  }
-  return this.configStore.set(value)
- }
-
- getDefaultAccount(){
-  const c=this.configStore.get()
-  if(!c.defaultAccountId)return undefined
-  const a=this.store.get(c.defaultAccountId)
-  return a?{...a,browserRunning:this.browser.isRunning(a.id)}:undefined
- }
 
  async add(provider:AccountProvider,displayName?:string){
   const id=randomUUID()
@@ -98,9 +73,6 @@ export class AccountManager {
   await this.browser.close(id)
   this.providers.delete(id)
   await this.store.remove(id)
-  if(this.configStore.get().defaultAccountId===id){
-   await this.configStore.set({})
-  }
  }
 
  findByProvider(provider:AccountProvider){return this.store.list().find(a=>a.provider===provider)}
