@@ -126,10 +126,13 @@ function browserState(ctx,sessionId,provider){
   }catch{}
   return ''
  })
- const matching=urls.some(url=>providerHost(provider,url))
+ const knownUrls=urls.filter(Boolean)
+ const matching=knownUrls.some(url=>providerHost(provider,url))
+ const loading=openTabs.length>0&&knownUrls.length===0
  return {
   count:openTabs.length,
   matching,
+  loading,
   urls,
   tabIds:openTabs.map(tab=>tab.tabId)
  }
@@ -186,7 +189,14 @@ async function reconcileBrowser(ctx,reason='poll'){
    return
   }
 
-  // 状态 4：已有 Browser，但没有当前 Provider 页面。
+  // 状态 4：Browser Tab 已存在，但 WebView 尚未建立/尚未得到稳定 URL。
+  // 这是 DSH Browser 的正常加载窗口，绝不能重复创建 Browser Tab。
+  if(browser.loading){
+   console.info('[dsh-account-models] browser action: wait for native Browser load',provider.id)
+   return
+  }
+
+  // 状态 5：已有 Browser，但没有当前 Provider 页面。
   // 不抢占用户已有页面；创建一个新的原生 Browser 实例承载目标 Provider。
   if(!browser.matching){
    openProviderBrowser(ctx,provider)
