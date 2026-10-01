@@ -12,6 +12,13 @@ export abstract class WebPageAdapter{
  abstract canChat():Promise<boolean>
  abstract getConversationState():Promise<WebConversationState>
  abstract sendMessage(text:string):Promise<void>
+ /**
+  * Web AI 页面原生附件入口。默认实现沿用 DOM file input。
+  * Provider 如果使用自定义上传流程，可以覆盖此方法。
+  */
+ async uploadAttachments(files:readonly string[]):Promise<void>{
+  await this.uploadFiles(files)
+ }
  abstract readAnswer(previous:string):Promise<string>
  abstract detectError():Promise<{code:string;message:string}|null>
  abstract isGenerating():Promise<boolean>
