@@ -4,9 +4,7 @@ const PROVIDERS=[
  ['copilot','Microsoft Copilot','https://copilot.microsoft.com/'],['huggingchat','HuggingChat','https://huggingface.co/chat/'],['kimi','Kimi','https://kimi.moonshot.cn/'],['chatglm','智谱 AI','https://chatglm.cn/'],
 ]
 
-const POLL_MS=700
 const BRIDGE_POLL_MS=120
-let timer
 let bridgeTimer
 
 // Provider 仍然只来自 DSH 中间模型选择器。
@@ -60,26 +58,49 @@ function providerHost(provider,url){
 
 function apply(ctx){
  console.info('[dsh-account-models] client active: native model selector + right browser workspace')
- const poll=async()=>{
+ const syncSelection=()=>{
   try{
-   const response=await fetch('/api/dsh-account-models/active-provider',{cache:'no-store'})
-   if(!response.ok)return
-   const state=await response.json()
-   if(!state.provider||!state.url)return
-   const key=state.provider+'|'+state.url
-   if(apply.lastKey===key)return
-   apply.lastKey=key
-   try{
-    ctx.sidebarRight.openTab('browser',{params:{url:state.url}})
-   }catch(error){
-    console.warn('[dsh-account-models] DSH Browser tab unavailable:',error)
+   const sessionId=ctx.sidebarRight.mounted.getSnapshot()
+   if(!sessionId)return
+   const directory=ctx.modelDirectories.directoryFor(sessionId)
+   const update=()=>{
+    const selection=directory.store.getSnapshot().current
+    if(!selection)return
+    if(selection.provider!=='web-ai')return
+    const item=PROVIDERS.find(([id])=>id===selection.model)
+    if(!item)return
+    const [,providerName,url]=item
+    const key=selection.model+'|'+url
+    if(apply.lastKey===key)return
+    apply.lastKey=key
+    try{
+     ctx.sidebarRight.openTab('browser',{params:{url}})
+     console.info('[dsh-account-models] opened native Browser for selected provider:',providerName)
+    }catch(error){
+     console.warn('[dsh-account-models] DSH Browser tab unavailable:',error)
+    }
    }
-  }catch{}
+   const unsubscribe=directory.store.subscribe(update)
+   update()
+   return unsubscribe
+  }catch(error){
+   console.warn('[dsh-account-models] model selection sync unavailable:',error)
+  }
  }
- poll()
- timer=setInterval(poll,POLL_MS)
+ let unsubscribeSelection=()=>{}
+ const bindSelection=()=>{
+  unsubscribeSelection()
+  unsubscribeSelection=syncSelection()??(()=>{})
+ }
+ bindSelection()
+ const unsubscribeMounted=ctx.sidebarRight.mounted.subscribe(bindSelection)
  bridgeTimer=setInterval(processBridgeRequest,BRIDGE_POLL_MS)
- ctx.effect(()=>()=>{clearInterval(timer);clearInterval(bridgeTimer)},'dsh-account-models: provider browser sync')
+ ctx.effect(()=>()=>{
+  unsubscribeSelection()
+  unsubscribeMounted()
+  clearInterval(bridgeTimer)
+ },'dsh-account-models: provider browser sync')
 }
+
 apply.lastKey=''
 module.exports={apply}
