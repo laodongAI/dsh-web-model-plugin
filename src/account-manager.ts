@@ -59,8 +59,6 @@ export class AccountManager {
   if(!adapter)throw new Error('Provider 未初始化')
   const health=await adapter.health()
   const status=health.status
-  const snapshot=this.snapshot(account.id)
-  if(snapshot)await this.store.upsert({...snapshot,status:status==='ready'?'ready':status==='login_required'?'login_required':'unknown',updatedAt:new Date().toISOString(),lastError:health.message})
   return {provider,status,ready:status==='ready',message:health.message??null,accountId:account.id,url:health.state.url}
  }
 
