@@ -29,10 +29,36 @@ async function processBridgeRequest(){
    return
   }
   try{
-   const value=await frame.executeJavaScript(request.expression,true)
-   await bridgeResult(request.id,true,value)
+   // GuestView 的 executeJavaScript 对页面异常经常只返回通用错误。
+   // 在页面上下文包一层显式 try/catch，把真实 JS 异常序列化回 Node 侧，
+   // 这样 LLM Adapter 能区分页面脚本错误、页面结构变化和浏览器本身故障。
+   const wrapped=`(async()=>{try{
+      const value=await (${request.expression})
+      return {__dshBridgeOk:true,value}
+    }catch(error){
+      return {
+       __dshBridgeOk:false,
+       error:{
+        name:error?.name||'Error',
+        message:error?.message||String(error),
+        stack:error?.stack||'',
+       },
+      }
+    }})()`
+   const result=await frame.executeJavaScript(wrapped,true)
+   if(result?.__dshBridgeOk===false){
+    const detail=result.error||{}
+    const message=[
+     detail.name||'Error',
+     detail.message||'页面脚本执行失败',
+     detail.stack||'',
+    ].filter(Boolean).join(': ')
+    await bridgeResult(request.id,false,undefined,`PAGE_SCRIPT_ERROR: ${message}`)
+   }else{
+    await bridgeResult(request.id,true,result?.value)
+   }
   }catch(error){
-   await bridgeResult(request.id,false,undefined,String(error?.message||error))
+   await bridgeResult(request.id,false,undefined,`GUEST_VIEW_ERROR: ${String(error?.message||error)}`)
   }
  }catch{}
 }
