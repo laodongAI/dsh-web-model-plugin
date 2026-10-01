@@ -13,6 +13,7 @@ export class AccountManager {
  private store=new AccountStore(this.rootDir)
  private browser:BrowserManager
  private providers=new Map<string,DefaultBrowserProvider>()
+ private selectedProvider:AccountProvider|undefined
 
  constructor(browserConfig:BrowserManagerConfig={cdpReadyTimeoutMs:20000},private readonly pageTiming:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){
   this.browser=new BrowserManager(browserConfig)
@@ -21,6 +22,9 @@ export class AccountManager {
  async init(){await this.store.load()}
 
  list():AccountSnapshot[]{return this.store.list().map(a=>({...a,browserRunning:this.browser.isRunning(a.id)}))}
+
+ selectProvider(provider:AccountProvider){this.selectedProvider=provider}
+ getSelectedProvider(){return this.selectedProvider}
 
  async add(provider:AccountProvider,displayName?:string){
   const id=randomUUID()
@@ -69,15 +73,17 @@ export class AccountManager {
  }
 
  async remove(id:string){
-  this.require(id)
+  const a=this.require(id)
   await this.browser.close(id)
   this.providers.delete(id)
   await this.store.remove(id)
+  if(this.selectedProvider===a.provider)this.selectedProvider=undefined
  }
 
  findByProvider(provider:AccountProvider){return this.store.list().find(a=>a.provider===provider)}
 
  async ensureProvider(provider:AccountProvider){
+  this.selectProvider(provider)
   const existing=this.findByProvider(provider)
   if(existing){
    if(!this.browser.isRunning(existing.id))await this.open(existing.id)
