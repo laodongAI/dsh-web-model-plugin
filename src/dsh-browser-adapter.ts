@@ -111,13 +111,13 @@ export class DshBrowserAdapter extends LlmAdapter{
    const providerName=PROVIDER_MAP[selected].name
    const detail=error instanceof Error?error.message:String(error)
    if(code==='LOGIN_REQUIRED'||code==='SESSION_EXPIRED'){
-    throw new LlmError(`${providerName} 尚未完成登录或登录状态已失效。请在 DSH 右侧浏览器完成登录/验证，确认页面可以正常对话后，再回到 DSH Chat 重新发送。`,'AUTH',{cause:error})
+    throw new LlmError(`${providerName} 尚未完成登录或登录状态已失效。请在 DSH 右侧浏览器完成登录/验证，确认页面可以正常对话后，再回到 DSH Chat 重新发送。\n浏览器地址：${PROVIDER_MAP[selected].url}`,'AUTH',{cause:error})
    }
    if(code==='PAGE_CHANGED'){
-    throw new LlmError(`${providerName} 右侧浏览器的页面或会话发生变化，当前请求无法继续。请在右侧浏览器恢复到可对话页面，然后在 DSH Chat 重新发送。`,'PROVIDER_ERROR',{cause:error})
+    throw new LlmError(`${providerName} 右侧浏览器的页面或会话发生变化，当前请求无法继续。请在右侧浏览器恢复到可对话页面，然后在 DSH Chat 重新发送。\n浏览器地址：${PROVIDER_MAP[selected].url}`,'PROVIDER_ERROR',{cause:error})
    }
    if(code==='SERVICE_UNAVAILABLE'){
-    throw new LlmError(`${providerName} 没有在规定时间内返回响应。请检查 DSH 右侧浏览器中的页面、网络和登录状态，修复后在 DSH Chat 重新发送。`,'UNAVAILABLE',{cause:error})
+    throw new LlmError(`${providerName} 没有在规定时间内返回响应。请检查 DSH 右侧浏览器中的页面、网络和登录状态，修复后在 DSH Chat 重新发送。\n浏览器地址：${PROVIDER_MAP[selected].url}`,'UNAVAILABLE',{cause:error})
    }
    const mapped=code==='RATE_LIMITED'?'RATE_LIMIT':code==='QUOTA_EXCEEDED'?'QUOTA_EXCEEDED':'PROVIDER_ERROR'
    throw error instanceof LlmError?error:new LlmError(`${providerName} Web AI 请求失败：${detail}` ,mapped,{cause:error})
