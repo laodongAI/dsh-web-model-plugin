@@ -109,7 +109,7 @@ function rightSidebarState(ctx){
  const sessionId=ctx.sidebarRight.mounted.getSnapshot()
  if(!sessionId)return {mounted:false,expanded:false}
  try{
-  return {mounted:true,expanded:ctx.sidebarRight.isExpanded()}
+  return {mounted:true,expanded:typeof ctx.sidebarRight.isExpanded==='function' ? ctx.sidebarRight.isExpanded() : true}
  }catch(error){
   console.warn('[dsh-account-models] sidebar state unavailable:',error)
   return {mounted:true,expanded:false}
@@ -117,7 +117,7 @@ function rightSidebarState(ctx){
 }
 
 function browserState(ctx,sessionId,provider){
- const openTabs=ctx.sidebarRight.openTabs.getSnapshot().filter(tab=>tab.sessionId===sessionId&&tab.kind==='browser')
+ const openTabs=(ctx.sidebarRight.openTabs?.getSnapshot?.()??[]).filter(tab=>tab.sessionId===sessionId&&tab.kind==='browser')
  const frames=[...document.querySelectorAll('webview[data-sidebar-browser-frame], iframe[data-sidebar-browser-frame]')]
  const urls=frames.map(frame=>{
   try{
