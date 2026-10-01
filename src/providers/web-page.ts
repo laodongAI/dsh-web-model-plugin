@@ -24,6 +24,42 @@ export abstract class WebPageAdapter{
  abstract isGenerating():Promise<boolean>
  abstract expectedHost():string
 
+ protected async fillAndSubmit(selectors:string,buttonPattern:string,text:string,provider:string){
+  await this.cdp.evaluate<void>(`(()=>{ 
+   const sels=${JSON.stringify(selectors.split(',').map(s=>s.trim()))};
+   const el=sels.map(s=>document.querySelector(s)).find(Boolean);
+   if(!el)throw new Error('PAGE_CHANGED: '+${JSON.stringify(provider)}+' 输入框未找到');
+   el.focus();
+   const value=${JSON.stringify(text)};
+   if(el instanceof HTMLTextAreaElement||el instanceof HTMLInputElement){
+    const proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
+    const setter=Object.getOwnPropertyDescriptor(proto,'value')?.set;
+    setter?.call(el,value);
+    el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+   }else{
+    el.textContent=value;
+    el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));
+   }
+   const re=new RegExp(${JSON.stringify(buttonPattern)},'i');
+   const button=[...document.querySelectorAll('button,[role="button"]')].find(b=>!b.hasAttribute('disabled')&&!b.getAttribute('aria-disabled')&&re.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')));
+   if(button){button.click();return}
+   el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));
+  })()`);
+ }
+
+ protected async readLatest(selectors:string,previous:string){
+  return this.cdp.evaluate<string>(`(()=>{const p=${JSON.stringify(previous)};const sels=${JSON.stringify(selectors.split(',').map(s=>s.trim()))};const nodes=sels.flatMap(s=>[...document.querySelectorAll(s)]);const values=nodes.map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean);const candidates=values.filter(x=>x!==p);return candidates.at(-1)||''})()`);
+ }
+
+ protected async isBusy(buttonPattern='stop|停止|中止|cancel'){
+  return this.cdp.evaluate<boolean>(`(()=>{const re=new RegExp(${JSON.stringify(buttonPattern)},'i');return [...document.querySelectorAll('button,[role="button"]')].some(b=>re.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||''))&&!b.hasAttribute('disabled'))})()`);
+ }
+
+ protected async commonError(loginPattern:string,quotaPattern='quota|limit|额度|限额',ratePattern='rate limit|too many|频繁'){
+  return this.cdp.evaluate<{code:string;message:string}|null>(`(()=>{const t=document.body?.innerText||'';if(new RegExp(${JSON.stringify(loginPattern)},'i').test(t)&&!document.querySelector('textarea,[contenteditable="true"],input[placeholder*="消息"],input[placeholder*="Message"]'))return {code:'LOGIN_REQUIRED',message:${JSON.stringify('网页账号需要登录')}};if(new RegExp(${JSON.stringify(quotaPattern)},'i').test(t))return {code:'QUOTA_EXCEEDED',message:${JSON.stringify('当前账号达到使用限制')}};if(new RegExp(${JSON.stringify(ratePattern)},'i').test(t))return {code:'RATE_LIMITED',message:${JSON.stringify('请求过于频繁')}};return null})()`);
+ }
+
  async uploadFiles(files:readonly string[]):Promise<void>{
   if(files.length===0)return
   try{await this.cdp.setFileInputFiles('input[type="file"]',files)}
