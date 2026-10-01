@@ -1,10 +1,5 @@
-import {WebPageAdapter,type WebConversationState} from '../web-page.js'
-export class HuggingChatPage extends WebPageAdapter{
- expectedHost(){return 'huggingface.co'}
- async canChat(){return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector('textarea,[contenteditable="true"]'))()`)}
- async getConversationState():Promise<WebConversationState>{return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/\\/chat\\/([\\w-]+)/)||[])[1],ready:!!document.querySelector('textarea,[contenteditable="true"]'),changed:false}))()`)}
- async sendMessage(text:string){await this.cdp.evaluate<void>(`(()=>{const e=document.querySelector('textarea,[contenteditable="true"]');if(!e)throw new Error('PAGE_CHANGED: HuggingChat 输入框未找到');e.focus();if(e instanceof HTMLTextAreaElement){const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;s?.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}))}else{e.textContent=${JSON.stringify(text)};e.dispatchEvent(new InputEvent('input',{bubbles:true}))}const b=[...document.querySelectorAll('button')].find(x=>/send|发送|submit/i.test((x.textContent||'')+' '+(x.getAttribute('aria-label')||''))&&!x.disabled);if(b)b.click();else e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}))})()`)}
- async readAnswer(previous:string){return this.cdp.evaluate<string>(`(()=>{const p=${JSON.stringify(previous)};const n=[...document.querySelectorAll('[data-testid*="message"],[class*="message"],main article')].map(x=>(x.innerText||'').trim()).filter(x=>x&&x!==p);return n.at(-1)||''})()`)}
- async isGenerating(){return this.cdp.evaluate<boolean>(`(()=>[...document.querySelectorAll('button')].some(b=>/stop|停止|cancel/i.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||''))))()`)}
+ async readAnswer(previous:string){return this.readLatest("[data-testid*=\"message\"],[class*=\"message\"],main article",previous)}
+
+ async isGenerating(){return this.isBusy()}
  async detectError(){return this.cdp.evaluate<any>(`(()=>{const t=document.body?.innerText||'';if(/sign in|登录/i.test(t)&&!document.querySelector('textarea,[contenteditable="true"]'))return {code:'LOGIN_REQUIRED',message:'HuggingChat 需要登录'};if(/limit|quota|too many/i.test(t))return {code:'QUOTA_EXCEEDED',message:'HuggingChat 当前达到限制'};return null})()`)}
-}
+} async detectError(){return this.commonError("登录|sign in|log in")}}
