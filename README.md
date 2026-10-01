@@ -104,11 +104,11 @@ dsh.cmd plugin --profile desktop remove dsh-account-models
 12. Right Sidebar 的 Web AI 浏览器能够显示真实 Chromium 页面。
 
 ## 当前边界与下一步
-DSH 官方 Right Sidebar Browser 在 Desktop 中使用 Electron `<webview>`，支持独立 Browser Tab 和持久页面；插件公开的 `DesktopBrowserBridge` 目前只提供 guest acquire/release/open-request 能力，没有向普通插件暴露 `webContents`、DOM、`executeJavaScript` 或 CDP attach。citeturn1view0
+DSH 官方 Right Sidebar Browser 在 Desktop 中使用 Electron `<webview>`，支持独立 Browser Tab 和持久页面；插件公开的 `DesktopBrowserBridge` 目前只提供 guest acquire/release/open-request 能力，没有向普通插件暴露 `webContents`、DOM、`executeJavaScript` 或 CDP attach。
 
 因此 0.2.3 不伪装“两个浏览器已经统一”。当前已经完成：Provider 只在 DSH 中间模型选择器出现；选中 Provider 后自动打开对应右侧 Browser；用户在右侧完成登录/验证；Host 请求失败时 DSH Chat 给出明确的右侧修复提示；用户修复后再次发送即可重新验证。
 
-下一阶段需要在 DSH Browser 正式增加 **Browser Automation Bridge**：由右侧 Browser Tab 自己持有 guest/webview，并向受控插件暴露 `currentTab`、`navigate`、`evaluate`、`waitForSelector`、`screenshot`、`sendInput` 等受限能力，再让本插件的 Host/Client 两侧通过该 Bridge 操作同一个 Browser Tab。这样才能真正达到“用户看到的右侧浏览器 = Agent 调试/DOM 操作的浏览器”。右侧 Browser 本身是 DSH 原生能力，不应再额外启动第二个可见浏览器。citeturn1view0turn1view1
+下一阶段需要在 DSH Browser 正式增加 **Browser Automation Bridge**：由右侧 Browser Tab 自己持有 guest/webview，并向受控插件暴露 `currentTab`、`navigate`、`evaluate`、`waitForSelector`、`screenshot`、`sendInput` 等受限能力，再让本插件的 Host/Client 两侧通过该 Bridge 操作同一个 Browser Tab。这样才能真正达到“用户看到的右侧浏览器 = Agent 调试/DOM 操作的浏览器”。右侧 Browser 本身是 DSH 原生能力，不应再额外启动第二个可见浏览器。
 
 ## 安全边界
 本插件不保存密码、不提取 Cookie/Token、不调用目标站点私有 API、不重放浏览器 HTTP 请求、不绕过 CAPTCHA 或二次验证。
