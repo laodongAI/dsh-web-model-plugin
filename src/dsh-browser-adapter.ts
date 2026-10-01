@@ -4,8 +4,6 @@ import type {AttachmentStore} from '@deepseek-ai/dsh-attachment'
 import {PROVIDERS,PROVIDER_MAP} from './provider-catalog.js'
 import type {AccountProvider} from './types.js'
 
-const DEFAULT_MODEL_ID='default'
-
 function providerOfModel(model:string):AccountProvider|undefined{
  if((PROVIDERS as readonly {id:AccountProvider}[]).some(x=>x.id===model))return model as AccountProvider
  return undefined
@@ -27,8 +25,6 @@ function extractToolCalls(text:string){
 }
 
 function stripToolCalls(text:string){return text.replace(TOOL_CALL_RE,'').trim()}
-const accountIdOf=(id:string)=>id===DEFAULT_MODEL_ID?'':id.startsWith('web-ai:')?id.slice('web-ai:'.length):id
-
 export class DshBrowserAdapter extends LlmAdapter{
  constructor(private readonly accounts:AccountManager,private readonly attachments:AttachmentStore){super()}
 
@@ -53,10 +49,6 @@ export class DshBrowserAdapter extends LlmAdapter{
    const account=this.accounts.findByProvider(selected)
    return {provider,id:model,name:PROVIDER_MAP[selected].name+'（浏览器）',inputModalities:['text','image']}
   }
-  if(model===DEFAULT_MODEL_ID){
-   const account=this.accounts.getDefaultAccount()
-   if(account)return {provider,id:model,name:account.displayName,inputModalities:['text','image']}
-  }
   const legacy=this.accounts.list().find(a=>a.id===model)
   if(legacy)return {provider,id:model,name:legacy.displayName,inputModalities:['text','image']}
   throw new LlmError(`未知 Web AI 模型：${model}`,'MODEL_UNAVAILABLE')
@@ -65,14 +57,14 @@ export class DshBrowserAdapter extends LlmAdapter{
  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
   if(options.provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${options.provider}`,'MODEL_UNAVAILABLE')
   const selected=providerOfModel(options.model)
-  const account=selected?await this.accounts.ensureProvider(selected):this.accounts.getDefaultAccount()
-  if(!account)throw new LlmError('尚未选择有效的 Web AI Provider','MODEL_UNAVAILABLE')
+  if(!selected)throw new LlmError('必须从 DSH 中间模型选择器选择一个 Web AI Provider','MODEL_UNAVAILABLE')
+  const account=await this.accounts.ensureProvider(selected)
   let adapter=this.accounts.getProvider(account.id)
   if(!adapter){
    await this.accounts.open(account.id)
    adapter=this.accounts.getProvider(account.id)
   }
-  if(!adapter)throw new LlmError('账号浏览器启动失败，请在 Web AI 设置中检查账号','SERVICE_UNAVAILABLE')
+  if(!adapter)throw new LlmError('账号浏览器启动失败，请检查对应 Provider 的浏览器会话','SERVICE_UNAVAILABLE')
 
   const messages=options.messages.map(m=>({
    role:m.role,
