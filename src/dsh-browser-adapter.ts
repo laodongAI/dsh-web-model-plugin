@@ -46,6 +46,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   if(provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${provider}`,'MODEL_UNAVAILABLE')
   const selected=providerOfModel(model)
   if(selected){
+   this.accounts.selectProvider(selected)
    const account=this.accounts.findByProvider(selected)
    return {provider,id:model,name:PROVIDER_MAP[selected].name+'（浏览器）',inputModalities:['text','image']}
   }
@@ -58,6 +59,7 @@ export class DshBrowserAdapter extends LlmAdapter{
   if(options.provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${options.provider}`,'MODEL_UNAVAILABLE')
   const selected=providerOfModel(options.model)
   if(!selected)throw new LlmError('必须从 DSH 中间模型选择器选择一个 Web AI Provider','MODEL_UNAVAILABLE')
+  this.accounts.selectProvider(selected)
   const account=await this.accounts.ensureProvider(selected)
   let adapter=this.accounts.getProvider(account.id)
   if(!adapter){
@@ -133,7 +135,7 @@ export class DshBrowserAdapter extends LlmAdapter{
     const path=this.attachments.imageHostPath(block.attachment)
     if(path)result.push({path,name:block.attachment.name,kind:'image'})
    }else if(block.type==='text'){
-    const match=block.text.match(/\[File\s+"[^"]+"\s+\(\d+\s+bytes,\s+sha256:[^)]+\):\s+verbatim\s+read-only\s+copy\s+saved\s+at\s+"([^"]+)"\./)
+    const match=block.text.match(/\[File\s+"[^"]+"\s+\(\d+\s+bytes,\s+sha256:[^)]+\):\s+verbatim\s+read-only\s+copy\s+saved\s+at\s+"([^"]+)"/)
     if(match){
      try{result.push({path:JSON.parse('"'+match[1]+'"'),kind:'file'})}catch{}
     }
