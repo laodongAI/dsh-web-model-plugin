@@ -5,11 +5,59 @@ const PROVIDERS=[
 ]
 
 const POLL_MS=700
+const BRIDGE_POLL_MS=120
 let timer
+let bridgeTimer
 
 // Provider 仍然只来自 DSH 中间模型选择器。
 // 这里唯一的 Client 行为是：Host 确认当前 Provider 后，把对应网页打开到 DSH 原生右侧 Browser。
 // 不增加左侧 Provider UI，也不维护第二套 Provider 配置。
+
+async function processBridgeRequest(){
+ try{
+  const response=await fetch('/api/dsh-account-models/browser/bridge/next',{cache:'no-store'})
+  if(!response.ok)return
+  const request=await response.json()
+  if(!request.id||!request.provider||!request.expression)return
+  const frames=[...document.querySelectorAll('webview[data-sidebar-browser-frame]')]
+  const candidates=frames.filter(frame=>{
+   try{
+    const url=frame.getURL?.()||''
+    return typeof url==='string' && providerHost(request.provider,url)
+   }catch{return false}
+  })
+  const frame=candidates.at(-1)
+  if(!frame){
+   await fetch('/api/dsh-account-models/browser/bridge/result',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:request.id,ok:false,error:'PAGE_CHANGED: DSH 右侧 Browser 中没有找到当前 Provider 页面'})})
+   return
+  }
+  try{
+   const value=await frame.executeJavaScript(request.expression,true)
+   await fetch('/api/dsh-account-models/browser/bridge/result',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:request.id,ok:true,value})})
+  }catch(error){
+   await fetch('/api/dsh-account-models/browser/bridge/result',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:request.id,ok:false,error:String(error?.message||error)})})
+  }
+ }catch{}
+}
+
+function providerHost(provider,url){
+ try{
+  const host=new URL(url).hostname.toLowerCase()
+  return ({
+   deepseek:['chat.deepseek.com'],
+   chatgpt:['chatgpt.com','chat.openai.com'],
+   qwen:['chat.qwen.ai','qwen.ai'],
+   'tencent-yuanbao':['aistudio.tencent.com','yuanbao.tencent.com'],
+   doubao:['doubao.com'],
+   perplexity:['perplexity.ai'],
+   copilot:['copilot.microsoft.com'],
+   huggingchat:['huggingface.co'],
+   kimi:['kimi.moonshot.cn'],
+   chatglm:['chatglm.cn']
+  })[provider]?.some(domain=>host===domain||host.endsWith('.'+domain))??false
+ }catch{return false}
+}
+
 function apply(ctx){
  console.info('[dsh-account-models] client active: native model selector + right browser workspace')
  const poll=async()=>{
@@ -30,7 +78,8 @@ function apply(ctx){
  }
  await poll()
  timer=setInterval(poll,POLL_MS)
- ctx.effect(()=>()=>clearInterval(timer),'dsh-account-models: provider browser sync')
+ bridgeTimer=setInterval(processBridgeRequest,BRIDGE_POLL_MS)
+ ctx.effect(()=>()=>{clearInterval(timer);clearInterval(bridgeTimer)},'dsh-account-models: provider browser sync')
 }
 apply.lastKey=''
 module.exports={apply}
