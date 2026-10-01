@@ -23,14 +23,14 @@ async function processBridgeRequest(){
   if(!response.ok)return
   const request=await response.json()
   if(!request.id||!request.provider||!request.expression)return
-  const frame=await waitForProviderFrame(request.provider,BRIDGE_WAIT_MS)
-  if(!frame){
+  const initial=await waitForProviderFrame(request.provider,BRIDGE_WAIT_MS)
+  if(!initial){
    await bridgeResult(request.id,false,undefined,'BROWSER_NOT_READY: DSH 右侧 Browser 尚未建立当前 Provider 页面')
    return
   }
   try{
-   // GuestView 在页面刚导航完成、renderer 尚未稳定时，executeJavaScript 可能直接失败。
-   // 因此这里等待 loading 结束，并对瞬时的 GuestView 执行失败进行短暂重试。
+   // GuestView 导航期间，之前拿到的 <webview> DOM 对象可能已经失效。
+   // 每次重试都重新查找当前 Provider GuestView，避免对旧 renderer 执行脚本。
    const wrapped=`(async()=>{try{
       const value=await (${request.expression})
       return {__dshBridgeOk:true,value}
@@ -43,10 +43,20 @@ async function processBridgeRequest(){
     }})()`
    let result
    let lastError
-   for(let attempt=0;attempt<8;attempt++){
+   let lastState=''
+   for(let attempt=0;attempt<16;attempt++){
+    const frame=await findProviderFrame(request.provider)
+    if(!frame){
+     lastState='BROWSER_NOT_READY: 当前 Provider GuestView 已不存在'
+     await new Promise(resolve=>setTimeout(resolve,350))
+     continue
+    }
     try{
-     if(typeof frame.isLoading==='function'&&frame.isLoading()){
-      await new Promise(resolve=>setTimeout(resolve,250))
+     const url=typeof frame.getURL==='function'?(frame.getURL()||''):''
+     const loading=typeof frame.isLoading==='function'&&frame.isLoading()
+     lastState=url
+     if(loading){
+      await new Promise(resolve=>setTimeout(resolve,350))
       continue
      }
      result=await frame.executeJavaScript(wrapped,true)
@@ -54,10 +64,10 @@ async function processBridgeRequest(){
      break
     }catch(error){
      lastError=error
-     await new Promise(resolve=>setTimeout(resolve,250))
+     await new Promise(resolve=>setTimeout(resolve,350))
     }
    }
-   if(lastError)throw lastError
+   if(lastError)throw new Error('GuestView executeJavaScript failed after retry: '+String(lastError?.message||lastError)+(lastState?' (url: '+lastState+')':''))
    if(result?.__dshBridgeOk===false){
     const detail=result.error||{}
     const message=[detail.name||'Error',detail.message||'页面脚本执行失败',detail.stack||''].filter(Boolean).join(': ')
@@ -71,6 +81,15 @@ async function processBridgeRequest(){
  }catch{}
 }
 
+async function findProviderFrame(provider){
+ const frames=[...document.querySelectorAll('webview')].filter(frame=>{
+  try{return typeof frame.getURL==='function'}catch{return false}
+ })
+ const candidates=frames.filter(frame=>{
+  try{return providerHost(provider,frame.getURL?.()||'')}catch{return false}
+ })
+ return candidates.at(-1)
+}
 async function waitForProviderFrame(provider,timeoutMs){
  const deadline=Date.now()+timeoutMs
  while(Date.now()<deadline){
