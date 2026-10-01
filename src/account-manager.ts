@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto'
 import {homedir} from 'node:os'
 import {join} from 'node:path'
 import {AccountStore} from './account-store.js'
-import {BrowserManager,type BrowserManagerConfig} from './browser-manager.js'
+import type {WebviewBrowserBridge} from './browser/webview-bridge.js'
 import type {AccountProvider,AccountSnapshot} from './types.js'
 import {DefaultBrowserProvider} from './providers/browser-provider.js'
 import type {WebPageTiming} from './providers/web-page.js'
@@ -11,17 +11,17 @@ import {PROVIDER_MAP} from './provider-catalog.js'
 export class AccountManager {
  readonly rootDir=join(homedir(),'.dsh','account-models')
  private store=new AccountStore(this.rootDir)
- private browser:BrowserManager
+ private readonly bridge:WebviewBrowserBridge
  private providers=new Map<string,DefaultBrowserProvider>()
  private selectedProvider:AccountProvider|undefined
 
- constructor(browserConfig:BrowserManagerConfig={cdpReadyTimeoutMs:20000},private readonly pageTiming:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){
-  this.browser=new BrowserManager(browserConfig)
+ constructor(bridge:WebviewBrowserBridge,private readonly pageTiming:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){
+  this.bridge=bridge
  }
 
  async init(){await this.store.load()}
 
- list():AccountSnapshot[]{return this.store.list().map(a=>({...a,browserRunning:this.browser.isRunning(a.id)}))}
+ list():AccountSnapshot[]{return this.store.list().map(a=>({...a,browserRunning:a.status!=='browser_closed'}))}
 
  selectProvider(provider:AccountProvider){this.selectedProvider=provider}
  getSelectedProvider(){return this.selectedProvider}
@@ -29,34 +29,33 @@ export class AccountManager {
  async add(provider:AccountProvider,displayName?:string){
   const id=randomUUID()
   const now=new Date().toISOString()
-  const profileDir=join(this.rootDir,provider,id,'profile')
-  const port=await this.browser.open(id,provider,profileDir)
+  const profileDir=join(this.rootDir,provider,id)
+  const port=0
   const a={
    id,
    provider,
    displayName:displayName?.trim()||PROVIDER_MAP[provider].name,
    profileDir,
    debugPort:port,
-   status:'login_required' as const,
+   status:'unknown' as const,
    createdAt:now,
    updatedAt:now
   }
   await this.store.upsert(a)
-  this.providers.set(id,new DefaultBrowserProvider(provider,port,undefined,this.pageTiming))
+  this.providers.set(id,new DefaultBrowserProvider(provider,this.bridge.connect(provider),undefined,this.pageTiming))
   return this.snapshot(id)!
  }
 
  async open(id:string){
   const a=this.require(id)
-  const port=await this.browser.open(id,a.provider,a.profileDir)
-  await this.store.upsert({...a,debugPort:port,status:'unknown',updatedAt:new Date().toISOString()})
-  if(!this.providers.has(id))this.providers.set(id,new DefaultBrowserProvider(a.provider,port,undefined,this.pageTiming))
+  await this.store.upsert({...a,debugPort:0,status:'unknown',updatedAt:new Date().toISOString()})
+  if(!this.providers.has(id))this.providers.set(id,new DefaultBrowserProvider(a.provider,this.bridge.connect(a.provider),undefined,this.pageTiming))
   return this.snapshot(id)!
  }
 
  async checkReady(id:string){
   const a=this.require(id)
-  if(!this.browser.isRunning(id))await this.open(id)
+  if(!this.providers.has(id))await this.open(id)
   const p=this.providers.get(id)
   if(!p)throw new Error('Provider 未初始化')
   const ready=await p.checkReady()
@@ -66,7 +65,6 @@ export class AccountManager {
 
  async close(id:string){
   const a=this.require(id)
-  await this.browser.close(id)
   this.providers.delete(id)
   await this.store.upsert({...a,status:'browser_closed',updatedAt:new Date().toISOString()})
   return this.snapshot(id)!
@@ -74,7 +72,6 @@ export class AccountManager {
 
  async remove(id:string){
   const a=this.require(id)
-  await this.browser.close(id)
   this.providers.delete(id)
   await this.store.remove(id)
   if(this.selectedProvider===a.provider)this.selectedProvider=undefined
@@ -95,7 +92,7 @@ export class AccountManager {
 
  async screenshot(id:string){
   const a=this.require(id)
-  if(!this.browser.isRunning(id))await this.open(id)
+  if(!a.status!=='browser_closed')await this.open(id)
   const p=this.providers.get(id)
   if(!p)throw new Error('Provider 未初始化')
   return p.screenshot()
