@@ -61,7 +61,7 @@ export async function apply(ctx:Context,config:Config){
   await accounts.init()
   syncLog('ACCOUNT_INIT_COMPLETED')
   await bootLog('apply: accounts.init completed')
-  await bootLog(`accounts.init: completed; accountCount=${accounts.list().length}; default=${JSON.stringify(accounts.getDefaultAccount()??null)}`)
+  await bootLog(`accounts.init: completed; accountCount=${accounts.list().length}`)
   syncLog('ADAPTER_CREATING')
   const adapter=new DshBrowserAdapter(accounts,ctx.attachments)
   syncLog('ADAPTER_CREATED')
