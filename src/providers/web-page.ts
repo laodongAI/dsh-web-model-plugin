@@ -62,7 +62,7 @@ export abstract class WebPageAdapter{
    const el=sels.map(s=>document.querySelector(s)).find(Boolean);
    if(!el)throw new Error('PAGE_CHANGED: '+${JSON.stringify(provider)}+' 输入框未找到');
    const re=new RegExp(${JSON.stringify(buttonPattern)},'i');
-   const button=[...document.querySelectorAll('button,[role="button"]')].find(b=>!b.hasAttribute('disabled')&&!b.getAttribute('aria-disabled')&&re.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')));
+   const button=[...document.querySelectorAll('button,[role="button"]')].find(b=>!b.hasAttribute('disabled')&&!b.getAttribute('aria-disabled')&&re.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+(b.getAttribute('data-testid')||'')));
    if(button){button.click();return}
    el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));
   })()`,fillTimeout)
@@ -84,8 +84,8 @@ export abstract class WebPageAdapter{
   * 现改为：登录检测保持整页扫描（有"无输入框"守护）；配额/限流只匹配完整错误短语，
   * 并把命中的页面原文片段附在错误消息里，便于区分真实报错与误报。
   */
- protected async commonError(loginPattern:string,quotaPattern='额度已用完|额度不足|已达使用上限|达到使用上限|余额不足|欠费|quota exceeded|usage limit|reached your|out of credits',ratePattern='请求过于频繁|操作过于频繁|稍后再试|rate limit|too many requests'){
-  return this.cdp.evaluate<{code:string;message:string}|null>(`(()=>{const t=document.body?.innerText||'';if(new RegExp(${JSON.stringify(loginPattern)},'i').test(t)&&!document.querySelector('textarea,[contenteditable="true"],input[placeholder*="消息"],input[placeholder*="Message"]'))return {code:'LOGIN_REQUIRED',message:${JSON.stringify('网页账号需要登录')}};const q=t.match(new RegExp(${JSON.stringify(quotaPattern)},'i'));if(q)return {code:'QUOTA_EXCEEDED',message:'当前账号达到使用限制（页面提示：'+String(q[0]).slice(0,60)+'）'};const r=t.match(new RegExp(${JSON.stringify(ratePattern)},'i'));if(r)return {code:'RATE_LIMITED',message:'请求过于频繁（页面提示：'+String(r[0]).slice(0,60)+'）'};return null})()`);
+ protected async commonError(loginPattern:string,quotaPattern='额度已用完|额度不足|已达使用上限|达到使用上限|余额不足|欠费|quota exceeded|usage limit|reached your|out of credits',ratePattern='请求过于频繁|操作过于频繁|稍后再试|rate limit|too many requests',inputSelectors='textarea,[contenteditable="true"],[role="textbox"],textarea[aria-label],input[placeholder*="消息"],input[placeholder*="Message"]'){
+  return this.cdp.evaluate<{code:string;message:string}|null>(`(()=>{const t=document.body?.innerText||'';if(new RegExp(${JSON.stringify(loginPattern)},'i').test(t)&&!document.querySelector(${JSON.stringify(inputSelectors)}))return {code:'LOGIN_REQUIRED',message:${JSON.stringify('网页账号需要登录')}};const q=t.match(new RegExp(${JSON.stringify(quotaPattern)},'i'));if(q)return {code:'QUOTA_EXCEEDED',message:'当前账号达到使用限制（页面提示：'+String(q[0]).slice(0,60)+'）'};const r=t.match(new RegExp(${JSON.stringify(ratePattern)},'i'));if(r)return {code:'RATE_LIMITED',message:'请求过于频繁（页面提示：'+String(r[0]).slice(0,60)+'）'};return null})()`);
  }
 
  async uploadFiles(files:readonly string[]):Promise<void>{
@@ -124,7 +124,10 @@ export abstract class WebPageAdapter{
 
  async health():Promise<WebPageHealthResult>{
   const state=await this.getConversationState()
-  if(!state.url.includes(this.expectedHost()))return {status:'page_changed',message:'当前浏览器页面不是目标模型页面',state}
+  let hostname=''
+  try{hostname=new URL(state.url).hostname.toLowerCase()}catch{}
+  const allowedHosts=this.expectedHosts().map(host=>host.toLowerCase())
+  if(!hostname||!allowedHosts.some(host=>hostname===host||hostname.endsWith('.'+host)))return {status:'page_changed',message:'当前浏览器页面不是目标模型页面',state}
   if(!state.ready)return {status:'page_changed',message:'目标页面输入区尚未就绪，页面结构可能已变化',state}
   if(!await this.canChat())return {status:'login_required',message:'网页账号登录状态已失效或尚未登录',state}
   const error=await this.detectError()
@@ -156,7 +159,9 @@ export abstract class WebPageAdapter{
   throw new Error('SERVICE_UNAVAILABLE: 网页模型响应超时')
  }
 
- async stop(){await this.cdp.evaluate<void>(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>/stop|停止|中止/i.test(x.textContent||''));b?.click()})()`)}
+ async stop(){await this.cdp.evaluate<void>(`(()=>{const b=[...document.querySelectorAll('button,[role="button"]')].find(x=>/stop|停止|中止|cancel/i.test((x.textContent||'')+' '+(x.getAttribute('aria-label')||'')+' '+(x.getAttribute('title')||'')));b?.click()})()`)}
+
+ protected expectedHosts():readonly string[]{return [this.expectedHost()]}
 }
 
 /** 页面适配器配置：全部为纯数据，网站改版时只改 provider-catalog.ts 中的 PAGE_CONFIGS 数据表 */
@@ -165,6 +170,8 @@ export interface WebPageConfig{
  displayName:string
  /** 目标站点 host（health 校验 location.href 是否包含） */
  host:string
+ /** 兼容域名；仅匹配精确域名或其子域 */
+ hostAliases?:readonly string[]
  /** 输入框选择器（canChat 判定 + sendMessage 填充 + ready 判定） */
  inputSelectors:string
  /** 会话 ID 的 URL 路径正则源字符串（捕获组 1 为会话 ID） */
@@ -187,6 +194,7 @@ export interface WebPageConfig{
 export class ConfiguredWebPage extends WebPageAdapter{
  constructor(protected readonly config:WebPageConfig,cdp:CdpClient,timing:WebPageTiming){super(cdp,timing)}
  expectedHost(){return this.config.host}
+ protected expectedHosts(){return [this.config.host,...(this.config.hostAliases??[])]}
  async canChat(){
   return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector(${JSON.stringify(this.config.inputSelectors)}))()`)
  }
@@ -197,13 +205,19 @@ export class ConfiguredWebPage extends WebPageAdapter{
   await this.fillAndSubmit(this.config.inputSelectors,this.config.sendButtonPattern,text,this.config.displayName)
  }
  async readAnswer(previous:string){
+  if(this.config.displayName==='Microsoft Copilot')return this.readCopilotAnswer(previous)
   return this.readLatest(this.config.answerSelectors,previous)
  }
  async isGenerating(){
   return this.isBusy(this.config.busyPattern)
  }
  async detectError(){
-  return this.commonError(this.config.loginPattern,this.config.quotaPattern,this.config.ratePattern)
+  const error=await this.commonError(this.config.loginPattern,this.config.quotaPattern,this.config.ratePattern,this.config.inputSelectors)
+  if(error||this.config.displayName!=='Microsoft Copilot')return error
+  return this.cdp.evaluate<{code:string;message:string}|null>(`(()=>{const t=document.body?.innerText||'';const match=t.match(/something went wrong|an error occurred|暂时出了点问题|发生错误/i);return match?{code:'SERVICE_UNAVAILABLE',message:'Microsoft Copilot 页面发生错误（页面提示：'+match[0]+'）'}:null})()`)
+ }
+ private async readCopilotAnswer(previous:string){
+  return this.cdp.evaluate<string>(`(()=>{const p=${JSON.stringify(previous)};const assistant='[data-author="assistant"],[data-message-author-role="assistant"],[data-testid*="assistant"]';let nodes=[...document.querySelectorAll(assistant)];if(!nodes.length){const userSelector='[data-author="user"],[data-message-author-role="user"],[data-testid*="user"]';const users=[...document.querySelectorAll(userSelector)];const lastUser=users.at(-1);const articles=[...document.querySelectorAll('article')].filter(x=>!x.matches(userSelector)&&!x.closest(userSelector));nodes=lastUser?articles.filter(x=>!!(lastUser.compareDocumentPosition(x)&Node.DOCUMENT_POSITION_FOLLOWING)):articles}const inputTexts=new Set([...document.querySelectorAll('textarea,input,[contenteditable="true"],[role="textbox"]')].map(x=>(x.value??x.innerText??x.textContent??'').trim()).filter(Boolean));const values=nodes.filter(x=>!x.closest('textarea,input,[contenteditable="true"],[role="textbox"]')).map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).filter(x=>!inputTexts.has(x));if(!values.length)return '';for(let i=values.length-1;i>=0;i--){if(values[i]!==p)return values[i]}return values.at(-1)||''})()`)
  }
 }
 
