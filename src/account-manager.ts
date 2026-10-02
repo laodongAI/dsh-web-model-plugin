@@ -15,15 +15,31 @@ export class AccountManager {
  private providers=new Map<string,DefaultBrowserProvider>()
  private selectedProvider:AccountProvider|undefined
 
+ // Provider 选择变化回调（供插件入口注入日志等副作用）
+ private providerSelectedListeners=new Array<(provider:AccountProvider)=>void>()
+
  constructor(bridge:WebviewBrowserBridge,private readonly pageTiming:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){
   this.bridge=bridge
+ }
+
+ /** 订阅 Provider 选择变化，返回取消订阅函数 */
+ onProviderSelected(listener:(provider:AccountProvider)=>void){
+  this.providerSelectedListeners.push(listener)
+  return()=>{this.providerSelectedListeners=this.providerSelectedListeners.filter(x=>x!==listener)}
  }
 
  async init(){await this.store.load()}
 
  list():AccountSnapshot[]{return this.store.list().map(a=>({...a,browserRunning:a.status!=='browser_closed'}))}
 
- selectProvider(provider:AccountProvider){this.selectedProvider=provider}
+ selectProvider(provider:AccountProvider){
+  // 幂等去重：仅在变化时触发回调，避免每次请求重复打日志
+  if(this.selectedProvider===provider)return
+  this.selectedProvider=provider
+  for(const listener of this.providerSelectedListeners){
+   try{listener(provider)}catch(error){console.warn('[dsh-account-models] provider-selected listener failed:',error)}
+  }
+ }
  getSelectedProvider(){return this.selectedProvider}
 
  async add(provider:AccountProvider,displayName?:string){

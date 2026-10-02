@@ -3,7 +3,8 @@ import {request} from 'node:http'
 export interface CdpTab { id:string; url:string; title:string; webSocketDebuggerUrl?:string }
 
 export interface CdpClient {
- evaluate<T>(expression:string):Promise<T>
+ /** timeoutMs：单次 DOM 表达式执行超时（毫秒）；缺省由底层 Bridge 使用默认值（大 payload 填充建议传更大值） */
+ evaluate<T>(expression:string,timeoutMs?:number):Promise<T>
  setFileInputFiles(selector:string,files:readonly string[]):Promise<void>
  close():Promise<void>
 }

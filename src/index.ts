@@ -16,12 +16,16 @@ export interface Config {
  streamTimeoutMs:number
  noStartTimeoutMs:number
  uploadTimeoutMs:number
+ /** 等待用户在右侧浏览器完成登录/修复后自动继续的窗口（毫秒）；0=不等待直接报错 */
+ loginWaitTimeoutMs:number
 }
 
 export const Config:Schema<Config>=Schema.object({
  streamTimeoutMs:Schema.number().min(10000).default(600000),
  noStartTimeoutMs:Schema.number().min(1000).default(300000),
  uploadTimeoutMs:Schema.number().min(1000).default(15000),
+ // 恢复窗口：LOGIN_REQUIRED/PAGE_CHANGED 时在 DSH 对话内提示，轮询页面恢复后自动继续；默认 10 分钟，0=关闭
+ loginWaitTimeoutMs:Schema.number().min(0).default(600000),
 })
 
 export const inject=['llm','webServer','attachments']
@@ -50,7 +54,14 @@ export async function apply(ctx:Context,config:Config){
   syncLog('CONFIG_RECEIVED')
   await bootLog(`config: ${JSON.stringify({streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})}`)
   syncLog('ACCOUNT_MANAGER_CREATING')
-  const bridge=new WebviewBrowserBridge()
+  // 为 Bridge 注入分级日志（对接 cordis logger 的 debug/info/warn/error）
+  const bridge=new WebviewBrowserBridge((level,message)=>{
+   const text=`[${name}] ${message}`
+   if(level==='error')ctx.logger.error(text)
+   else if(level==='warn')ctx.logger.warn(text)
+   else if(level==='info')ctx.logger.info(text)
+   else ctx.logger.debug(text)
+  })
   const accounts=new AccountManager(bridge,{streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})
   syncLog('ACCOUNT_MANAGER_CREATED')
   await bootLog('apply: AccountManager created')
@@ -61,7 +72,7 @@ export async function apply(ctx:Context,config:Config){
   await bootLog('apply: accounts.init completed')
   await bootLog(`accounts.init: completed; accountCount=${accounts.list().length}`)
   syncLog('ADAPTER_CREATING')
-  const adapter=new DshBrowserAdapter(accounts,ctx.attachments)
+  const adapter=new DshBrowserAdapter(accounts,ctx.attachments,{loginWaitTimeoutMs:config.loginWaitTimeoutMs})
   syncLog('ADAPTER_CREATED')
   await bootLog('apply: adapter created')
   syncLog('LLM_REGISTER_START')

@@ -11,24 +11,33 @@ function providerOfModel(model:string):AccountProvider|undefined{
 
 const TOOL_CALL_RE=/<dsh_tool_call>\s*([\s\S]*?)\s*<\/dsh_tool_call>/g
 
-function extractToolCalls(text:string){
+function extractToolCallsLegacy(text:string){
+ return extractToolCalls(text,'legacy')
+}
+
+function stripToolCalls(text:string){return text.replace(TOOL_CALL_RE,'').trim()}
+/** 从文本提取 <dsh_tool_call> 工具调用；uniqueSeed 参与 ID 生成保证跨轮/跨会话唯一 */
+function extractToolCalls(text:string,uniqueSeed:string){
  const calls:{id:ToolCallId;name:string;arguments:string}[]=[]
+ let i=0
  for(const match of text.matchAll(TOOL_CALL_RE)){
+  i++
   try{
    const value=JSON.parse(match[1]) as {name?:unknown;arguments?:unknown;id?:unknown}
    if(typeof value.name!=='string'||!value.name.trim())continue
    const args=typeof value.arguments==='string'?value.arguments:JSON.stringify(value.arguments??{})
-   calls.push({id:(typeof value.id==='string'&&value.id?value.id:`web-${calls.length+1}`) as ToolCallId,name:value.name.trim(),arguments:args})
+   calls.push({id:(typeof value.id==='string'&&value.id?value.id:`web-${uniqueSeed}-${i}`) as ToolCallId,name:value.name.trim(),arguments:args})
   }catch{}
  }
  return calls
 }
-
-function stripToolCalls(text:string){return text.replace(TOOL_CALL_RE,'').trim()}
 export class DshBrowserAdapter extends LlmAdapter{
  private readonly conversations=new Map<string,{provider:AccountProvider}>()
+ // 同 session 并发防护：一个 DSH 会话同时只允许一个 Web AI 请求在途，防止重复发送到网页
+ private readonly inflight=new Set<string>()
 
- constructor(private readonly accounts:AccountManager,private readonly attachments:AttachmentStore){super()}
+ /** recovery.loginWaitTimeoutMs：LOGIN_REQUIRED/PAGE_CHANGED 时"等待用户在右侧浏览器修复后自动继续"的最长等待毫秒数；0=不等待直接报错 */
+ constructor(private readonly accounts:AccountManager,private readonly attachments:AttachmentStore,private readonly recovery:{loginWaitTimeoutMs:number}={loginWaitTimeoutMs:0}){super()}
 
  override providerInfo(provider:string){
   return {id:provider,name:'Web AI（浏览器）'}
@@ -61,6 +70,9 @@ export class DshBrowserAdapter extends LlmAdapter{
   if(options.provider!=='web-ai')throw new LlmError(`未知 Web AI Provider：${options.provider}`,'MODEL_UNAVAILABLE')
   const selected=providerOfModel(options.model)
   if(!selected)throw new LlmError('必须从 DSH 中间模型选择器选择一个 Web AI Provider','MODEL_UNAVAILABLE')
+  // 参数校验提前到启动浏览器之前，避免开页面后才报 UNSUPPORTED_OPTION
+  this.validateOptions(options)
+
   this.accounts.selectProvider(selected)
   const account=await this.accounts.ensureProvider(selected)
   let adapter=this.accounts.getProvider(account.id)
@@ -72,24 +84,59 @@ export class DshBrowserAdapter extends LlmAdapter{
 
   this.validateOptions(options)
   const sessionId=options.sessionId?String(options.sessionId):account.id
+  if(this.inflight.has(sessionId))throw new LlmError('当前 DSH 会话已有 Web AI 请求在进行中，请等待完成或点停止','PROVIDER_ERROR')
+  this.inflight.add(sessionId)
+  try{
   const toolSchemas=options.tools??[]
   const browserAttachments=this.collectAttachments(options.messages)
   const state=this.conversations.get(sessionId)
   const firstTurn=!state||state.provider!==selected
   const prompt=this.buildBrowserPrompt(options,firstTurn,toolSchemas)
-  let answer=''
-
+  // —— 实时流式状态：answer=网页累计回答；emitted=已作为 text-delta 下发的字符数；blockOpen=是否已发出 text block-start ——
+ let answer=''
+  let emitted=0
+  let blockOpen=false
+  // runChat：启动一次网页对话；首试与"恢复后重试"复用同一入口
+  const runChat=()=>adapter.chat({accountId:account.id,model:options.model,sessionId,messages:[{role:'user',content:prompt}],attachments:browserAttachments,signal:options.signal})
+  // consume：边收网页增量，边把 <dsh_tool_call> 标签之前的安全前缀实时下发给 DSH；疑似半截标签前缀暂缓，避免泄漏为正文
+  const consume=async function*(iter:AsyncIterable<string>):AsyncIterable<StreamChunk>{
+   for await(const delta of iter){
+    if(!delta)continue
+    answer+=delta
+    const tagStart=answer.indexOf('<dsh_tool_call>')
+    let safeEnd=tagStart>=0?tagStart:answer.length
+    if(tagStart<0){for(let n=Math.min(14,answer.length);n>0;n--){if(answer.endsWith('<dsh_tool_call>'.slice(0,n))){safeEnd=answer.length-n;break}}}
+    if(safeEnd>emitted){
+     if(!blockOpen){yield {type:'block-start',index:0,blockType:'text'};blockOpen=true}
+     yield {type:'text-delta',index:0,text:answer.slice(emitted,safeEnd)}
+     emitted=safeEnd
+    }
+   }
+  }
   try{
-   for await(const delta of adapter.chat({accountId:account.id,model:options.model,sessionId,messages:[{role:'user',content:prompt}],attachments:browserAttachments,signal:options.signal})){
-    if(delta)answer+=delta
+   try{
+    for await(const chunk of consume(runChat()))yield chunk
+   }catch(chatError){
+    // 可恢复异常（需登录/页面变化/暂不可用）且尚未产出任何内容：提示用户修复，轮询恢复后自动重试本次请求
+    const chatCode=adapter.classifyError(chatError)
+    const recoverable=emitted===0&&!options.signal?.aborted&&this.recovery.loginWaitTimeoutMs>0&&(chatCode==='LOGIN_REQUIRED'||chatCode==='PAGE_CHANGED'||chatCode==='SERVICE_UNAVAILABLE')
+    if(!recoverable)throw chatError
+    const reason=chatCode==='LOGIN_REQUIRED'?'需要登录':chatCode==='PAGE_CHANGED'?'页面或会话发生变化':'页面暂不可用'
+    if(!blockOpen){yield {type:'block-start',index:0,blockType:'text'};blockOpen=true}
+    yield {type:'text-delta',index:0,text:`[${PROVIDER_MAP[selected].name} ${reason}] 请在 DSH 右侧浏览器完成登录/修复页面（最长等待 ${Math.round(this.recovery.loginWaitTimeoutMs/60000)} 分钟），恢复后将自动继续本次请求……\n\n`}
+    const recovered=await this.waitForRecovery(adapter,this.recovery.loginWaitTimeoutMs,options.signal)
+    if(!recovered)throw chatError
+    yield {type:'text-delta',index:0,text:'[检测到页面已恢复，自动继续]\n\n'}
+    // 重试前清空 answer：避免首试的半截回答与重试回答拼接成畸形文本
+    answer=''
+    for await(const chunk of consume(runChat()))yield chunk
    }
    this.conversations.set(sessionId,{provider:selected})
-   const toolCalls=extractToolCalls(answer)
+   const toolCalls=extractToolCalls(answer,`${sessionId}-${Date.now().toString(36)}`)
    const visible=stripToolCalls(answer)
    if(toolCalls.length){
     if(visible){
-     yield {type:'block-start',index:0,blockType:'text'}
-     yield {type:'text-delta',index:0,text:visible}
+     if(emitted<visible.length){if(!blockOpen){yield {type:'block-start',index:0,blockType:'text'};blockOpen=true};yield {type:'text-delta',index:0,text:visible.slice(emitted)}}
      yield {type:'block-end',index:0,block:{type:'text',text:visible}}
     }
     for(let i=0;i<toolCalls.length;i++){
@@ -103,11 +150,13 @@ export class DshBrowserAdapter extends LlmAdapter{
     return
    }
    if(!visible)throw new LlmError('网页没有提取到模型回答','EMPTY_RESPONSE')
-   yield {type:'block-start',index:0,blockType:'text'}
-   yield {type:'text-delta',index:0,text:visible}
+   // 正常结束：补发尚未下发的尾部文本（曾被暂缓的半截前缀最终证实不是工具标签）
+   if(emitted<visible.length){if(!blockOpen){yield {type:'block-start',index:0,blockType:'text'};blockOpen=true};yield {type:'text-delta',index:0,text:visible.slice(emitted)}}
    yield {type:'block-end',index:0,block:{type:'text',text:visible}}
    yield {type:'finish',reason:{kind:'stop'}}
   }catch(error){
+   // 用户主动取消（Stop）：按 LLM 协议映射为 ABORTED，避免被误报为 PROVIDER_ERROR
+   if(options.signal?.aborted&&!(error instanceof LlmError))throw new LlmError('请求已取消','ABORTED',{cause:error})
    const code=adapter.classifyError(error)
    const providerName=PROVIDER_MAP[selected].name
    const detail=error instanceof Error?error.message:String(error)
@@ -123,6 +172,21 @@ export class DshBrowserAdapter extends LlmAdapter{
    const mapped=code==='RATE_LIMITED'?'RATE_LIMIT':code==='QUOTA_EXCEEDED'?'QUOTA_EXCEEDED':'PROVIDER_ERROR'
    throw error instanceof LlmError?error:new LlmError(`${providerName} Web AI 请求失败：${detail}` ,mapped,{cause:error})
   }
+  }finally{
+   // 无论成功/失败/取消都释放并发锁，防止死锁后续请求
+   this.inflight.delete(sessionId)
+  }
+ }
+
+ /** 轮询页面健康直到 ready/超时/取消；用于"等待用户手工修复后自动继续"的恢复窗口 */
+ private async waitForRecovery(adapter:{health():Promise<{status:string}>},timeoutMs:number,signal?:AbortSignal){
+  const deadline=Date.now()+timeoutMs
+  while(Date.now()<deadline){
+   if(signal?.aborted)return false
+   await new Promise(resolve=>setTimeout(resolve,2000))
+   try{if((await adapter.health()).status==='ready')return true}catch{}
+  }
+  return false
  }
 
  private validateOptions(options:GenerateOptions){
