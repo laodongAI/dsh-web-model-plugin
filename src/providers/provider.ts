@@ -5,11 +5,14 @@ export interface BrowserAttachment{path:string;name?:string;kind:'image'|'file'}
 export interface BrowserChatRequest{
  accountId:string; model:string; sessionId?:string;
  messages:readonly {role:string;content:string}[]; attachments?:readonly BrowserAttachment[]; signal?:AbortSignal
+ onSubmitted?():void
 }
 export interface BrowserProvider{
  readonly provider:AccountProvider
  listModels():Promise<readonly BrowserProviderModel[]>
  checkReady():Promise<boolean>
+ health(sessionId?:string):Promise<import('./web-page.js').WebPageHealthResult>
  chat(request:BrowserChatRequest):AsyncIterable<string>
+ resume(request:BrowserChatRequest):AsyncIterable<string>
  classifyError(error:unknown):BrowserProviderErrorCode
 }

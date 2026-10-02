@@ -1,10 +1,34 @@
 import {WebPageAdapter,type WebConversationState} from '../web-page.js'
+
+/**
+ * ChatGPT Web 页面适配器。
+ * 仅通过 DSH 右侧可见 WebView/GuestView 的 DOM 交互，
+ * 不调用 Provider 私有 HTTP API。
+ */
 export class ChatGptPage extends WebPageAdapter{
- expectedHost(){return 'chatgpt.com'}
- async canChat(){return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector('textarea,[contenteditable="true"]'))()`)}
- async getConversationState():Promise<WebConversationState>{return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/(?:c|conversation)\/([a-zA-Z0-9_-]+)/)||[])[1],ready:!!document.querySelector('textarea,[contenteditable="true"]'),changed:false}))()`)}
- async sendMessage(text:string){await this.cdp.evaluate<void>(`(()=>{const el=document.querySelector('textarea,[contenteditable="true"]');if(!el)throw new Error('PAGE_CHANGED: ChatGPT 输入框未找到');el.focus();if(el instanceof HTMLTextAreaElement){const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;s?.call(el,${JSON.stringify(text)});el.dispatchEvent(new Event('input',{bubbles:true}))}else{el.textContent=${JSON.stringify(text)};el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:${JSON.stringify(text)}}))}const b=[...document.querySelectorAll('button')].find(x=>/send|发送/i.test(x.textContent||'')&&!x.disabled);if(b)b.click();else el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}))})()`)}
- async readAnswer(previous:string){return this.cdp.evaluate<string>(`(()=>{const p=${JSON.stringify(previous)};const nodes=[...document.querySelectorAll('[data-message-author-role="assistant"]')];const a=nodes.map(x=>(x.innerText||'').trim()).filter(x=>x&&x!==p);return a.at(-1)||''})()`)}
- async isGenerating(){return this.cdp.evaluate<boolean>(`(()=>[...document.querySelectorAll('button')].some(b=>/stop|停止|中止/i.test(b.textContent||'')))()`)}
- async detectError(){return this.cdp.evaluate<{code:string;message:string}|null>(`(()=>{const t=document.body?.innerText||'';if(/log in|sign up|登录|注册/i.test(t)&&!document.querySelector('textarea,[contenteditable="true"]'))return {code:'LOGIN_REQUIRED',message:'ChatGPT 需要登录'};if(/usage limit|quota|limit reached|额度/i.test(t))return {code:'QUOTA_EXCEEDED',message:'当前 ChatGPT 账号达到使用限制'};if(/too many|rate limit|频繁/i.test(t))return {code:'RATE_LIMITED',message:'请求过于频繁'};return null})()`)}
+ expectedHost(){return "chatgpt.com"}
+
+ async canChat(){
+  return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector("textarea,[contenteditable=\"true\"]"))()`)
+ }
+
+ async getConversationState():Promise<WebConversationState>{
+  return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/(?:c|conversation)/([a-zA-Z0-9_-]+)/)||[])[1],ready:!!document.querySelector("textarea,[contenteditable=\"true\"]"),changed:false}))()`)
+ }
+
+ async sendMessage(text:string){
+  await this.fillAndSubmit("textarea,[contenteditable=\"true\"]",'发送|send|submit|生成',text,"ChatGPT")
+ }
+
+ async readAnswer(previous:string){
+  return this.readLatest("[data-message-author-role=\"assistant\"]",previous)
+ }
+
+ async isGenerating(){
+  return this.isBusy()
+ }
+
+ async detectError(){
+  return this.commonError("log in|sign up|登录|注册")
+ }
 }

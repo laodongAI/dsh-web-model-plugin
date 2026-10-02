@@ -1,10 +1,34 @@
 import {WebPageAdapter,type WebConversationState} from '../web-page.js'
+
+/**
+ * 腾讯元宝 Web 页面适配器。
+ * 仅通过 DSH 右侧可见 WebView/GuestView 的 DOM 交互，
+ * 不调用 Provider 私有 HTTP API。
+ */
 export class TencentYuanbaoPage extends WebPageAdapter{
- expectedHost(){return 'aistudio.tencent.com'}
- async canChat(){return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector('textarea,[contenteditable="true"],input[placeholder*="问"]'))()`)}
- async getConversationState():Promise<WebConversationState>{return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/(?:chat|conversation|c)\\/([\\w-]+)/)||[])[1],ready:!!document.querySelector('textarea,[contenteditable="true"],input[placeholder*="问"]'),changed:false}))()`)}
- async sendMessage(text:string){await this.cdp.evaluate<void>(`(()=>{const e=document.querySelector('textarea,[contenteditable="true"],input[placeholder*="问"]');if(!e)throw new Error('PAGE_CHANGED: 腾讯 AI Studio 输入框未找到');e.focus();if(e instanceof HTMLInputElement||e instanceof HTMLTextAreaElement){const s=Object.getOwnPropertyDescriptor(e.constructor.prototype,'value')?.set;s?.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}))}else{e.textContent=${JSON.stringify(text)};e.dispatchEvent(new InputEvent('input',{bubbles:true}))}const b=[...document.querySelectorAll('button')].find(x=>/发送|生成|send|submit/i.test(x.textContent||'')&&!x.disabled);if(b)b.click();else e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}))})()`)}
- async readAnswer(previous:string){return this.cdp.evaluate<string>(`(()=>{const p=${JSON.stringify(previous)};const n=[...document.querySelectorAll('main article,[class*="message"],[class*="answer"],[class*="markdown"]')].map(x=>(x.innerText||'').trim()).filter(x=>x&&x!==p);return n.at(-1)||''})()`)}
- async isGenerating(){return this.cdp.evaluate<boolean>(`(()=>[...document.querySelectorAll('button')].some(b=>/停止|stop|中止/i.test(b.textContent||'')))()`)}
- async detectError(){return this.cdp.evaluate<any>(`(()=>{const t=document.body?.innerText||'';if(/登录|请登录|sign in/i.test(t)&&!document.querySelector('textarea,[contenteditable="true"]'))return {code:'LOGIN_REQUIRED',message:'腾讯 AI Studio 需要登录'};if(/额度|限额|quota|rate limit/i.test(t))return {code:'QUOTA_EXCEEDED',message:'当前账号达到使用限制'};return null})()`)}
+ expectedHost(){return "yuanbao.tencent.com"}
+
+ async canChat(){
+  return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector("textarea,[contenteditable=\"true\"],input[placeholder*=\"问\"],input[placeholder*=\"消息\"]"))()`)
+ }
+
+ async getConversationState():Promise<WebConversationState>{
+  return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/(?:chat|conversation|c)/([\w-]+)/)||[])[1],ready:!!document.querySelector("textarea,[contenteditable=\"true\"],input[placeholder*=\"问\"],input[placeholder*=\"消息\"]"),changed:false}))()`)
+ }
+
+ async sendMessage(text:string){
+  await this.fillAndSubmit("textarea,[contenteditable=\"true\"],input[placeholder*=\"问\"],input[placeholder*=\"消息\"]",'发送|send|submit|生成',text,"腾讯元宝")
+ }
+
+ async readAnswer(previous:string){
+  return this.readLatest("main article,[class*=\"message\"],[class*=\"answer\"],[class*=\"markdown\"]",previous)
+ }
+
+ async isGenerating(){
+  return this.isBusy()
+ }
+
+ async detectError(){
+  return this.commonError("登录|请登录|sign in")
+ }
 }

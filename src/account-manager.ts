@@ -2,22 +2,131 @@ import {randomUUID} from 'node:crypto'
 import {homedir} from 'node:os'
 import {join} from 'node:path'
 import {AccountStore} from './account-store.js'
-import {BrowserManager} from './browser-manager.js'
+import type {WebviewBrowserBridge} from './browser/webview-bridge.js'
 import type {AccountProvider,AccountSnapshot} from './types.js'
 import {DefaultBrowserProvider} from './providers/browser-provider.js'
+import type {WebPageTiming} from './providers/web-page.js'
+import {PROVIDER_MAP} from './provider-catalog.js'
+
 export class AccountManager {
  readonly rootDir=join(homedir(),'.dsh','account-models')
- private store=new AccountStore(this.rootDir); private browser=new BrowserManager()
+ private store=new AccountStore(this.rootDir)
+ private readonly bridge:WebviewBrowserBridge
  private providers=new Map<string,DefaultBrowserProvider>()
+ private selectedProvider:AccountProvider|undefined
+
+ // Provider 选择变化回调（供插件入口注入日志等副作用）
+ private providerSelectedListeners=new Array<(provider:AccountProvider)=>void>()
+
+ constructor(bridge:WebviewBrowserBridge,private readonly pageTiming:WebPageTiming={streamTimeoutMs:180000,noStartTimeoutMs:60000,uploadTimeoutMs:15000}){
+  this.bridge=bridge
+ }
+
+ /** 订阅 Provider 选择变化，返回取消订阅函数 */
+ onProviderSelected(listener:(provider:AccountProvider)=>void){
+  this.providerSelectedListeners.push(listener)
+  return()=>{this.providerSelectedListeners=this.providerSelectedListeners.filter(x=>x!==listener)}
+ }
+
  async init(){await this.store.load()}
- list():AccountSnapshot[]{return this.store.list().map(a=>({...a,browserRunning:this.browser.isRunning(a.id)}))}
- async add(provider:AccountProvider,displayName?:string){const id=randomUUID();const now=new Date().toISOString();const profileDir=join(this.rootDir,provider,id,'profile');const port=await this.browser.open(id,provider,profileDir);const a={id,provider,displayName:displayName?.trim()||(provider==='chatgpt'?'ChatGPT':provider==='qwen'?'Qwen':provider==='tencent-yuanbao'?'腾讯混元 AI Studio':provider==='doubao'?'豆包':provider==='perplexity'?'Perplexity':provider==='copilot'?'Microsoft Copilot':provider==='huggingchat'?'HuggingChat':provider==='chatglm'?'智谱 AI':'Kimi'),profileDir,debugPort:port,status:'login_required' as const,createdAt:now,updatedAt:now};await this.store.upsert(a);this.providers.set(id,new DefaultBrowserProvider(provider,port));return this.snapshot(id)!}
- async open(id:string){const a=this.require(id);const port=await this.browser.open(id,a.provider,a.profileDir);await this.store.upsert({...a,debugPort:port,status:'unknown',updatedAt:new Date().toISOString()});this.providers.set(id,new DefaultBrowserProvider(a.provider,port));return this.snapshot(id)!}
- async checkReady(id:string){const a=this.require(id);if(!this.browser.isRunning(id))await this.open(id);const p=this.providers.get(id);if(!p)throw new Error('Provider 未初始化');const ready=await p.checkReady();await this.store.upsert({...a,status:ready?'ready':'login_required',updatedAt:new Date().toISOString(),lastError:undefined});return this.snapshot(id)!}
- async close(id:string){const a=this.require(id);await this.browser.close(id);this.providers.delete(id);await this.store.upsert({...a,status:'browser_closed',updatedAt:new Date().toISOString()});return this.snapshot(id)!}
- async remove(id:string){this.require(id);await this.browser.close(id);this.providers.delete(id);await this.store.remove(id)}
+
+ list():AccountSnapshot[]{return this.store.list().map(a=>({...a,browserRunning:a.status!=='browser_closed'}))}
+
+ selectProvider(provider:AccountProvider){
+  // 幂等去重：仅在变化时触发回调，避免每次请求重复打日志
+  if(this.selectedProvider===provider)return
+  this.selectedProvider=provider
+  for(const listener of this.providerSelectedListeners){
+   try{listener(provider)}catch(error){console.warn('[dsh-account-models] provider-selected listener failed:',error)}
+  }
+ }
+ getSelectedProvider(){return this.selectedProvider}
+
+ async add(provider:AccountProvider,displayName?:string){
+  const id=randomUUID()
+  const now=new Date().toISOString()
+  const profileDir=join(this.rootDir,provider,id)
+  const port=0
+  const a={
+   id,
+   provider,
+   displayName:displayName?.trim()||PROVIDER_MAP[provider].name,
+   profileDir,
+   debugPort:port,
+   status:'unknown' as const,
+   createdAt:now,
+   updatedAt:now
+  }
+  await this.store.upsert(a)
+  this.providers.set(id,new DefaultBrowserProvider(provider,this.bridge.connect(provider),undefined,this.pageTiming))
+  return this.snapshot(id)!
+ }
+
+ async open(id:string){
+  const a=this.require(id)
+  await this.store.upsert({...a,debugPort:0,status:'unknown',updatedAt:new Date().toISOString()})
+  if(!this.providers.has(id))this.providers.set(id,new DefaultBrowserProvider(a.provider,this.bridge.connect(a.provider),undefined,this.pageTiming))
+  return this.snapshot(id)!
+ }
+
+ async checkProvider(provider:AccountProvider){
+  const account=await this.ensureProvider(provider)
+  const adapter=this.providers.get(account.id)
+  if(!adapter)throw new Error('Provider 未初始化')
+  const health=await adapter.health()
+  const status=health.status
+  return {provider,status,ready:status==='ready',message:health.message??null,accountId:account.id,url:health.state.url}
+ }
+
+ async checkReady(id:string){
+  const a=this.require(id)
+  if(!this.providers.has(id))await this.open(id)
+  const p=this.providers.get(id)
+  if(!p)throw new Error('Provider 未初始化')
+  const health=await p.health()
+  const status=health.status==='ready'?'ready':health.status==='login_required'?'login_required':health.status==='page_changed'?'page_changed':'error'
+  await this.store.upsert({...a,status,updatedAt:new Date().toISOString(),lastError:health.status==='ready'?undefined:health.message})
+  return this.snapshot(id)!
+ }
+
+ async close(id:string){
+  const a=this.require(id)
+  this.providers.delete(id)
+  await this.store.upsert({...a,status:'browser_closed',updatedAt:new Date().toISOString()})
+  return this.snapshot(id)!
+ }
+
+ async remove(id:string){
+  const a=this.require(id)
+  this.providers.delete(id)
+  await this.store.remove(id)
+  if(this.selectedProvider===a.provider)this.selectedProvider=undefined
+ }
+
+ findByProvider(provider:AccountProvider){return this.store.list().find(a=>a.provider===provider)}
+
+ async ensureProvider(provider:AccountProvider){
+  this.selectProvider(provider)
+  const existing=this.findByProvider(provider)
+  if(existing){
+   if(!this.providers.has(existing.id))await this.open(existing.id)
+   return this.snapshot(existing.id)!
+  }
+  return this.add(provider)
+ }
  getProvider(id:string){this.require(id);return this.providers.get(id)}
- snapshot(id:string){const a=this.store.get(id);return a?{...a,browserRunning:this.browser.isRunning(id)}:undefined}
- async dispose(){await this.browser.closeAll()}
- private require(id:string){const a=this.store.get(id);if(!a)throw new Error('账号不存在: '+id);return a}
+
+
+ snapshot(id:string){
+  const a=this.store.get(id)
+  return a?{...a,browserRunning:a.status!=='browser_closed'}:undefined
+ }
+
+ async dispose(){this.providers.clear()}
+
+ private require(id:string){
+  const a=this.store.get(id)
+  if(!a)throw new Error('账号不存在: '+id)
+  return a
+ }
 }

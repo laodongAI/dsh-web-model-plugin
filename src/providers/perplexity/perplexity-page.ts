@@ -1,10 +1,34 @@
 import {WebPageAdapter,type WebConversationState} from '../web-page.js'
+
+/**
+ * Perplexity Web 页面适配器。
+ * 仅通过 DSH 右侧可见 WebView/GuestView 的 DOM 交互，
+ * 不调用 Provider 私有 HTTP API。
+ */
 export class PerplexityPage extends WebPageAdapter{
- expectedHost(){return 'perplexity.ai'}
- async canChat(){return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector('textarea,[contenteditable="true"],textarea[placeholder*="Ask"]'))()`)}
- async getConversationState():Promise<WebConversationState>{return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/(?:search|thread)\\/([\\w-]+)/)||[])[1],ready:!!document.querySelector('textarea,[contenteditable="true"]'),changed:false}))()`)}
- async sendMessage(text:string){await this.cdp.evaluate<void>(`(()=>{const e=document.querySelector('textarea,[contenteditable="true"]');if(!e)throw new Error('PAGE_CHANGED: Perplexity 输入框未找到');e.focus();if(e instanceof HTMLTextAreaElement){const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;s?.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}))}else{e.textContent=${JSON.stringify(text)};e.dispatchEvent(new InputEvent('input',{bubbles:true}))}const b=[...document.querySelectorAll('button')].find(x=>/send|submit|发送/i.test(x.getAttribute('aria-label')||'')||/send|发送/i.test(x.textContent||''));if(b&&!b.hasAttribute('disabled'))b.click();else e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}))})()`)}
- async readAnswer(previous:string){return this.cdp.evaluate<string>(`(()=>{const p=${JSON.stringify(previous)};const n=[...document.querySelectorAll('[data-testid*="answer"],[class*="prose"],main article')].map(x=>(x.innerText||'').trim()).filter(x=>x&&x!==p);return n.at(-1)||''})()`)}
- async isGenerating(){return this.cdp.evaluate<boolean>(`(()=>[...document.querySelectorAll('button')].some(b=>/stop|停止|cancel/i.test((b.textContent||'')+' '+(b.getAttribute('aria-label')||''))))()`)}
- async detectError(){return this.cdp.evaluate<any>(`(()=>{const t=document.body?.innerText||'';if(/sign in|log in|登录/i.test(t)&&!document.querySelector('textarea,[contenteditable="true"]'))return {code:'LOGIN_REQUIRED',message:'Perplexity 需要登录'};if(/limit|quota|too many/i.test(t))return {code:'QUOTA_EXCEEDED',message:'Perplexity 当前达到使用限制'};return null})()`)}
+ expectedHost(){return "perplexity.ai"}
+
+ async canChat(){
+  return this.cdp.evaluate<boolean>(`(()=>!!document.querySelector("textarea,[contenteditable=\"true\"],textarea[placeholder*=\"Ask\"]"))()`)
+ }
+
+ async getConversationState():Promise<WebConversationState>{
+  return this.cdp.evaluate<WebConversationState>(`(()=>({url:location.href,conversationId:(location.pathname.match(/(?:search|thread)/([\w-]+)/)||[])[1],ready:!!document.querySelector("textarea,[contenteditable=\"true\"],textarea[placeholder*=\"Ask\"]"),changed:false}))()`)
+ }
+
+ async sendMessage(text:string){
+  await this.fillAndSubmit("textarea,[contenteditable=\"true\"],textarea[placeholder*=\"Ask\"]",'发送|send|submit|生成',text,"Perplexity")
+ }
+
+ async readAnswer(previous:string){
+  return this.readLatest("[data-testid*=\"answer\"],[class*=\"prose\"],main article",previous)
+ }
+
+ async isGenerating(){
+  return this.isBusy()
+ }
+
+ async detectError(){
+  return this.commonError("sign in|log in|登录")
+ }
 }
