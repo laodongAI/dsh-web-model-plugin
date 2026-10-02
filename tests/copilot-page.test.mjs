@@ -13,6 +13,7 @@ function createPage(url, overrides = {}) {
       if (expression.includes('location.href')) {
         return {url, conversationId: undefined, ready: true, changed: false}
       }
+      if (expression.includes('const text=x=>')) return null
       if (expression.includes('document.body?.innerText')) return null
       if (expression.includes('document.querySelector')) return true
       return null
@@ -48,5 +49,15 @@ test('Copilot selectors include accessible inputs and assistant-only message tar
   assert.match(expressions[0], /role=/)
   assert.match(expressions[1], /data-message-author-role/)
   assert.match(expressions[1], /data-author.*user/)
+  assert.match(expressions[1], /data-content/)
   assert.doesNotMatch(expressions[1], /class\*=/)
+})
+
+test('Copilot transient-error detection is scoped to visible alert surfaces', async () => {
+  const {page, expressions} = createPage('https://copilot.com/chat/')
+  await page.detectError()
+  assert.match(expressions[0], /role.*alert/)
+  assert.match(expressions[0], /aria-live.*assertive/)
+  assert.match(expressions[0], /getClientRects/)
+  assert.match(expressions[0], /for\(const surface of surfaces\)/)
 })
