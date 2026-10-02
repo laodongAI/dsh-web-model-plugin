@@ -1,13 +1,13 @@
 {
   "name": "dsh-account-models",
-  "version": "0.2.21",
+  "version": "0.2.26",
   "description": "DSH 0.2.0-rc.2 browser-session accounts for DeepSeek, ChatGPT, Qwen and other Web AI providers",
   "type": "module",
   "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
+  "types": "./lib/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib/types/index.d.ts",
+      "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
