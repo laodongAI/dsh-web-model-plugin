@@ -5,6 +5,8 @@ export interface CdpTab { id:string; url:string; title:string; webSocketDebugger
 export interface CdpClient {
  /** timeoutMs：单次 DOM 表达式执行超时（毫秒）；缺省由底层 Bridge 使用默认值（大 payload 填充建议传更大值） */
  evaluate<T>(expression:string,timeoutMs?:number):Promise<T>
+ /** Bind page operations to one DSH Session when the transport supports session routing. */
+ withSession?(sessionId:string):CdpClient
  setFileInputFiles(selector:string,files:readonly string[]):Promise<void>
  close():Promise<void>
 }

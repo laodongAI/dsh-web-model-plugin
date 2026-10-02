@@ -2,11 +2,12 @@ import {randomUUID} from 'node:crypto'
 import type {AccountProvider} from '../types.js'
 import type {CdpClient} from './cdp-client.js'
 
-export interface BrowserBridgeRequest {id:string;provider:AccountProvider;expression:string}
+export interface BrowserBridgeRequest {id:string;provider:AccountProvider;sessionId?:string;expression:string}
 
 interface Pending {
  id:string
  provider:AccountProvider
+ sessionId?:string
  expression:string
  createdAt:number
  claimed:boolean
@@ -26,7 +27,7 @@ export class WebviewBrowserBridge {
  // 可选分级日志回调（由插件入口注入 cordis logger：debug/info/warn/error）
  constructor(private readonly log:(level:'debug'|'info'|'warn'|'error',message:string)=>void=()=>{}){}
 
- evaluate<T>(provider:AccountProvider,expression:string,timeoutMs?:number):Promise<T>{
+ evaluate<T>(provider:AccountProvider,expression:string,timeoutMs?:number,sessionId?:string):Promise<T>{
   // 队列上限防护：积压过多直接拒绝，避免内存无限增长
   if(this.pending.size>=MAX_PENDING){
    this.log('error','bridge queue full, rejecting evaluate')
@@ -35,7 +36,7 @@ export class WebviewBrowserBridge {
   const id=randomUUID()
   const timeout=Math.min(timeoutMs??this.timeoutMs,MAX_TIMEOUT_MS)
   return new Promise<T>((resolve,reject)=>{
-   this.pending.set(id,{id,provider,expression,createdAt:Date.now(),claimed:false,timeout,
+   this.pending.set(id,{id,provider,sessionId,expression,createdAt:Date.now(),claimed:false,timeout,
     resolve:resolve as (value:unknown)=>void,reject})
    this.log('debug',`bridge evaluate queued: provider=${provider} id=${id} timeout=${timeout}`)
    // unref 防止 timer 阻止进程退出
@@ -45,32 +46,35 @@ export class WebviewBrowserBridge {
  }
 
  /** Client 轮询取任务；reportVisible=Client 上报的当前可见 Provider，目标 Provider 不在其中时快速失败挂起请求（Tab 已被关闭，避免空等超时） */
- next(reportVisible?:readonly AccountProvider[]):BrowserBridgeRequest|undefined{
+ next(reportVisible?:readonly AccountProvider[],reportSessionId?:string):BrowserBridgeRequest|undefined{
   this.expireAll()
   if(reportVisible){
    const visible=new Set(reportVisible)
    for(const item of this.pending.values()){
-    if(item.claimed||visible.has(item.provider))continue
+    if(item.claimed||(item.sessionId&&item.sessionId!==reportSessionId))continue
+    if(visible.has(item.provider))continue
     this.pending.delete(item.id)
     this.log('info',`bridge fast-fail: provider=${item.provider} 页面不可见（Tab 可能被关闭） id=${item.id}`)
     item.reject(new Error('BROWSER_NOT_READY: DSH 右侧浏览器没有当前 Provider 的页面（Tab 可能已被关闭），请重新打开后重试'))
    }
   }
-  const item=[...this.pending.values()].find(x=>!x.claimed)
+  const item=[...this.pending.values()].find(x=>!x.claimed&&(!x.sessionId||x.sessionId===reportSessionId))
   if(!item)return undefined
   item.claimed=true
-  return {id:item.id,provider:item.provider,expression:item.expression}
+  return {id:item.id,provider:item.provider,sessionId:item.sessionId??reportSessionId,expression:item.expression}
  }
 
  resolve(id:string,value:unknown){const item=this.pending.get(id);if(!item)return;this.pending.delete(id);this.log('debug',`bridge resolve: id=${id}`);item.resolve(value)}
  reject(id:string,message:string){const item=this.pending.get(id);if(!item)return;this.pending.delete(id);this.log('warn',`bridge reject: id=${id} error=${message}`);item.reject(new Error(message))}
 
  connect(provider:AccountProvider):CdpClient{
-  return {
-   evaluate:<T>(expression:string,timeoutMs?:number)=>this.evaluate<T>(provider,expression,timeoutMs),
+  const createClient=(sessionId?:string):CdpClient=>({
+   evaluate:<T>(expression:string,timeoutMs?:number)=>this.evaluate<T>(provider,expression,timeoutMs,sessionId),
+   withSession:(nextSessionId:string)=>createClient(nextSessionId),
    async setFileInputFiles(){throw new Error('当前使用 DSH 右侧原生 Browser，文件上传请先在右侧浏览器手工完成')},
    async close(){},
-  }
+  })
+  return createClient()
  }
 
  /** 观测数据：队列长度/claimed 数/最老请求年龄/按 Provider 分布，供 stats 端点诊断积压 */

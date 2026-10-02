@@ -31,9 +31,10 @@ export function registerRoutes(m:AccountManager,bridge:WebviewBrowserBridge,regi
   {kind:'exact',path:'/api/dsh-account-models/browser/bridge/next',handler:async(q,s)=>{
    if(q.method!=='GET')return json(s,{error:'Method Not Allowed'},405)
    // visible 查询参数：Client 上报的当前可见 Provider 列表，用于对已关闭 Tab 的挂起请求快速失败
-   const visibleParam=q.url?new URL(q.url,'http://localhost').searchParams.get('visible'):''
-   const visible=visibleParam?visibleParam.split(',').filter(Boolean) as AccountProvider[]:undefined
-   const request=bridge.next(visible)
+   const params=new URL(q.url??'/','http://localhost').searchParams
+   const visible= params.has('visible')?params.get('visible')!.split(',').filter(Boolean) as AccountProvider[]:undefined
+   const sessionId=params.get('sessionId')??undefined
+   const request=bridge.next(visible,sessionId)
    return json(s,request??{id:null})
   }},
   {kind:'exact',path:'/api/dsh-account-models/browser/bridge/result',handler:async(q,s)=>{
@@ -84,8 +85,20 @@ export function registerRoutes(m:AccountManager,bridge:WebviewBrowserBridge,regi
   }catch(error){return json(s,{error:error instanceof Error?error.message:String(error)},400)}
  }})
 
- const disposers=routes.map(register)
- return()=>disposers.forEach(dispose=>dispose())
+ const disposers:(()=>void)[]=[]
+ try{
+  for(const route of routes)disposers.push(register(route))
+ }catch(error){
+  for(const dispose of disposers.reverse()){
+   try{dispose()}catch(disposeError){console.error('[dsh-account-models] route rollback failed:',disposeError)}
+  }
+  throw error
+ }
+ return()=>{
+  for(const dispose of disposers.splice(0).reverse()){
+   try{dispose()}catch(error){console.error('[dsh-account-models] route disposal failed:',error)}
+  }
+ }
 }
 
 async function body(q:IncomingMessage){

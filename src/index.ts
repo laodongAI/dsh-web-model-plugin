@@ -50,19 +50,24 @@ async function bootLog(message:string){
 export async function apply(ctx:Context,config:Config){
  syncLog('APPLY_ENTERED')
  await bootLog(`apply: entered; pid=${process.pid}; node=${process.version}; cwd=${process.cwd()}`)
+ let disposeAdapter:(()=>void)|undefined
+ let disposeRoutes:(()=>void)|undefined
+ let effectRegistered=false
+ let bridge:WebviewBrowserBridge|undefined
+ let accounts:AccountManager|undefined
  try{
   syncLog('CONFIG_RECEIVED')
   await bootLog(`config: ${JSON.stringify({streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})}`)
   syncLog('ACCOUNT_MANAGER_CREATING')
   // 为 Bridge 注入分级日志（对接 cordis logger 的 debug/info/warn/error）
-  const bridge=new WebviewBrowserBridge((level,message)=>{
+  bridge=new WebviewBrowserBridge((level,message)=>{
    const text=`[${name}] ${message}`
    if(level==='error')ctx.logger.error(text)
    else if(level==='warn')ctx.logger.warn(text)
    else if(level==='info')ctx.logger.info(text)
    else ctx.logger.debug(text)
   })
-  const accounts=new AccountManager(bridge,{streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})
+  accounts=new AccountManager(bridge,{streamTimeoutMs:config.streamTimeoutMs,noStartTimeoutMs:config.noStartTimeoutMs,uploadTimeoutMs:config.uploadTimeoutMs})
   syncLog('ACCOUNT_MANAGER_CREATED')
   await bootLog('apply: AccountManager created')
   syncLog('ACCOUNT_INIT_START')
@@ -77,21 +82,28 @@ export async function apply(ctx:Context,config:Config){
   await bootLog('apply: adapter created')
   syncLog('LLM_REGISTER_START')
   await bootLog('llm.registerAdapter: starting; provider=web-ai')
-  const disposeAdapter=ctx.llm.registerAdapter(['web-ai'],adapter)
+  disposeAdapter=ctx.llm.registerAdapter(['web-ai'],adapter)
   syncLog('LLM_REGISTER_COMPLETED')
   await bootLog('llm.registerAdapter: completed')
   syncLog('ROUTES_REGISTER_START')
   await bootLog('webServer routes: starting')
-  const disposeRoutes=registerRoutes(accounts,bridge,r=>{syncLog(`ROUTE_REGISTER ${r.kind} ${r.path}`);void bootLog(`webServer.register: ${r.kind} ${r.path}`);return ctx.webServer.register(r)})
+  disposeRoutes=registerRoutes(accounts,bridge,r=>{syncLog(`ROUTE_REGISTER ${r.kind} ${r.path}`);void bootLog(`webServer.register: ${r.kind} ${r.path}`);return ctx.webServer.register(r)})
   syncLog('ROUTES_REGISTER_COMPLETED')
   await bootLog('apply: routes registered')
   syncLog('EFFECT_REGISTER_START')
-  ctx.effect(()=>()=>{syncLog('DISPOSE_START');try{disposeAdapter()}catch(error){syncLog(`DISPOSE_ADAPTER_FAILED ${error instanceof Error?error.message:String(error)}`)}try{disposeRoutes()}catch(error){syncLog(`DISPOSE_ROUTES_FAILED ${error instanceof Error?error.message:String(error)}`)}bridge.dispose();void accounts.dispose().catch(error=>syncLog(`DISPOSE_ACCOUNTS_FAILED ${error instanceof Error?error.message:String(error)}`));syncLog('DISPOSE_COMPLETED')},'dsh-account-models')
+  ctx.effect(()=>()=>{syncLog('DISPOSE_START');try{disposeAdapter?.()}catch(error){syncLog(`DISPOSE_ADAPTER_FAILED ${error instanceof Error?error.message:String(error)}`)}try{disposeRoutes?.()}catch(error){syncLog(`DISPOSE_ROUTES_FAILED ${error instanceof Error?error.message:String(error)}`)}bridge?.dispose();void accounts?.dispose().catch(error=>syncLog(`DISPOSE_ACCOUNTS_FAILED ${error instanceof Error?error.message:String(error)}`));syncLog('DISPOSE_COMPLETED')},'dsh-account-models')
+  effectRegistered=true
   syncLog('EFFECT_REGISTER_COMPLETED')
   await bootLog('webServer routes: completed')
   syncLog('APPLY_COMPLETED')
   await bootLog('apply: completed')
  }catch(error){
+  if(!effectRegistered){
+   try{disposeRoutes?.()}catch(cleanupError){syncLog(`INIT_ROLLBACK_ROUTES_FAILED ${cleanupError instanceof Error?cleanupError.message:String(cleanupError)}`)}
+   try{disposeAdapter?.()}catch(cleanupError){syncLog(`INIT_ROLLBACK_ADAPTER_FAILED ${cleanupError instanceof Error?cleanupError.message:String(cleanupError)}`)}
+   bridge?.dispose()
+   try{await accounts?.dispose()}catch(cleanupError){syncLog(`INIT_ROLLBACK_ACCOUNTS_FAILED ${cleanupError instanceof Error?cleanupError.message:String(cleanupError)}`)}
+  }
   const detail=error instanceof Error?(error.stack??error.message):String(error)
   syncLog(`APPLY_FAILED type=${typeof error}; name=${error instanceof Error?error.name:'unknown'}; message=${error instanceof Error?error.message:String(error)}`)
   syncLog(`APPLY_FAILED_DETAIL ${detail.replaceAll('\n',' | ')}`)

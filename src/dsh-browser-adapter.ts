@@ -11,24 +11,29 @@ function providerOfModel(model:string):AccountProvider|undefined{
 
 const TOOL_CALL_RE=/<dsh_tool_call>\s*([\s\S]*?)\s*<\/dsh_tool_call>/g
 
-function extractToolCallsLegacy(text:string){
- return extractToolCalls(text,'legacy')
-}
-
 function stripToolCalls(text:string){return text.replace(TOOL_CALL_RE,'').trim()}
 /** 从文本提取 <dsh_tool_call> 工具调用；uniqueSeed 参与 ID 生成保证跨轮/跨会话唯一 */
-function extractToolCalls(text:string,uniqueSeed:string){
+function extractToolCalls(text:string,uniqueSeed:string,allowedTools:ReadonlySet<string>){
  const calls:{id:ToolCallId;name:string;arguments:string}[]=[]
  let i=0
+ let openingTags=0
+ for(const _match of text.matchAll(/<dsh_tool_call>/g))openingTags++
  for(const match of text.matchAll(TOOL_CALL_RE)){
   i++
   try{
    const value=JSON.parse(match[1]) as {name?:unknown;arguments?:unknown;id?:unknown}
-   if(typeof value.name!=='string'||!value.name.trim())continue
+   if(typeof value.name!=='string'||!value.name.trim())throw new Error('工具名称无效')
+   const name=value.name.trim()
+   if(!allowedTools.has(name))throw new Error(`模型请求了本轮未提供的工具：${name}`)
    const args=typeof value.arguments==='string'?value.arguments:JSON.stringify(value.arguments??{})
-   calls.push({id:(typeof value.id==='string'&&value.id?value.id:`web-${uniqueSeed}-${i}`) as ToolCallId,name:value.name.trim(),arguments:args})
-  }catch{}
+   const parsedArgs=JSON.parse(args) as unknown
+   if(!parsedArgs||typeof parsedArgs!=='object'||Array.isArray(parsedArgs))throw new Error(`工具 ${name} 的 arguments 必须是 JSON 对象`)
+   calls.push({id:(typeof value.id==='string'&&value.id?value.id:`web-${uniqueSeed}-${i}`) as ToolCallId,name,arguments:args})
+  }catch(error){
+   throw new LlmError(`网页返回了无效的 DSH 工具调用：${error instanceof Error?error.message:String(error)}`,'PROVIDER_ERROR',{cause:error})
+  }
  }
+ if(openingTags!==calls.length)throw new LlmError('网页返回了未闭合或格式错误的 DSH 工具调用','PROVIDER_ERROR')
  return calls
 }
 export class DshBrowserAdapter extends LlmAdapter{
@@ -47,7 +52,11 @@ export class DshBrowserAdapter extends LlmAdapter{
   if(provider!=='web-ai')return []
   return PROVIDERS.map(item=>{
    const account=this.accounts.findByProvider(item.id)
-   const state=account?.status==='ready'?'已就绪':account?.status==='login_required'?'需要登录':'首次使用将打开浏览器'
+   const state=account?.status==='ready'?'已就绪'
+    :account?.status==='login_required'?'需要登录'
+    :account?.status==='page_changed'?'页面需要恢复'
+    :account?.status==='error'?'页面异常'
+    :'首次使用将打开浏览器'
    return {provider,id:item.id,name:item.name+'（浏览器）',description:`${item.name} · ${state}`,inputModalities:['text','image'] as const}
   })
  }
@@ -96,8 +105,10 @@ export class DshBrowserAdapter extends LlmAdapter{
  let answer=''
   let emitted=0
   let blockOpen=false
-  // runChat：启动一次网页对话；首试与"恢复后重试"复用同一入口
-  const runChat=()=>adapter.chat({accountId:account.id,model:options.model,sessionId,messages:[{role:'user',content:prompt}],attachments:browserAttachments,signal:options.signal})
+  let messageSubmitted=false
+  const chatRequest={accountId:account.id,model:options.model,sessionId,messages:[{role:'user',content:prompt}],attachments:browserAttachments,signal:options.signal,onSubmitted:()=>{messageSubmitted=true}}
+  const runChat=()=>adapter.chat(chatRequest)
+  const resumeChat=()=>adapter.resume(chatRequest)
   // consume：边收网页增量，边把 <dsh_tool_call> 标签之前的安全前缀实时下发给 DSH；疑似半截标签前缀暂缓，避免泄漏为正文
   const consume=async function*(iter:AsyncIterable<string>):AsyncIterable<StreamChunk>{
    for await(const delta of iter){
@@ -119,20 +130,20 @@ export class DshBrowserAdapter extends LlmAdapter{
    }catch(chatError){
     // 可恢复异常（需登录/页面变化/暂不可用）且尚未产出任何内容：提示用户修复，轮询恢复后自动重试本次请求
     const chatCode=adapter.classifyError(chatError)
-    const recoverable=emitted===0&&!options.signal?.aborted&&this.recovery.loginWaitTimeoutMs>0&&(chatCode==='LOGIN_REQUIRED'||chatCode==='PAGE_CHANGED'||chatCode==='SERVICE_UNAVAILABLE')
+    const recoverable=messageSubmitted&&emitted===0&&!options.signal?.aborted&&this.recovery.loginWaitTimeoutMs>0&&(chatCode==='LOGIN_REQUIRED'||chatCode==='PAGE_CHANGED'||chatCode==='SERVICE_UNAVAILABLE')
     if(!recoverable)throw chatError
     const reason=chatCode==='LOGIN_REQUIRED'?'需要登录':chatCode==='PAGE_CHANGED'?'页面或会话发生变化':'页面暂不可用'
     if(!blockOpen){yield {type:'block-start',index:0,blockType:'text'};blockOpen=true}
     yield {type:'text-delta',index:0,text:`[${PROVIDER_MAP[selected].name} ${reason}] 请在 DSH 右侧浏览器完成登录/修复页面（最长等待 ${Math.round(this.recovery.loginWaitTimeoutMs/60000)} 分钟），恢复后将自动继续本次请求……\n\n`}
-    const recovered=await this.waitForRecovery(adapter,this.recovery.loginWaitTimeoutMs,options.signal)
+    const recovered=await this.waitForRecovery(adapter,this.recovery.loginWaitTimeoutMs,options.signal,sessionId)
     if(!recovered)throw chatError
     yield {type:'text-delta',index:0,text:'[检测到页面已恢复，自动继续]\n\n'}
-    // 重试前清空 answer：避免首试的半截回答与重试回答拼接成畸形文本
+    // Resume reading the already-submitted response; never submit the user's prompt twice.
     answer=''
-    for await(const chunk of consume(runChat()))yield chunk
+    for await(const chunk of consume(resumeChat()))yield chunk
    }
    this.conversations.set(sessionId,{provider:selected})
-   const toolCalls=extractToolCalls(answer,`${sessionId}-${Date.now().toString(36)}`)
+   const toolCalls=extractToolCalls(answer,`${sessionId}-${Date.now().toString(36)}`,new Set(toolSchemas.map(tool=>tool.name)))
    const visible=stripToolCalls(answer)
    if(toolCalls.length){
     if(visible){
@@ -179,12 +190,15 @@ export class DshBrowserAdapter extends LlmAdapter{
  }
 
  /** 轮询页面健康直到 ready/超时/取消；用于"等待用户手工修复后自动继续"的恢复窗口 */
- private async waitForRecovery(adapter:{health():Promise<{status:string}>},timeoutMs:number,signal?:AbortSignal){
+ private async waitForRecovery(adapter:{health(sessionId?:string):Promise<{status:string}>},timeoutMs:number,signal:AbortSignal|undefined,sessionId:string){
   const deadline=Date.now()+timeoutMs
   while(Date.now()<deadline){
    if(signal?.aborted)return false
-   await new Promise(resolve=>setTimeout(resolve,2000))
-   try{if((await adapter.health()).status==='ready')return true}catch{}
+   await new Promise(resolve=>setTimeout(resolve,500))
+   if(signal?.aborted)return false
+   try{if((await adapter.health(sessionId)).status==='ready')return true}catch(error){
+    console.warn('[dsh-account-models] recovery health check failed:',error)
+   }
   }
   return false
  }

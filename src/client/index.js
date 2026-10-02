@@ -26,6 +26,7 @@ function log(level, message, ...extra) {
 
 let bridgeTimer
 let bridgeIdleTicks = 0
+let bridgeStopped = false
 let modelDirectories
 let currentProviderBySession = new Map()
 let reconcilePromiseBySession = new Map()
@@ -37,19 +38,20 @@ let unsubscribeAssistantStream = () => {}
 
 const inject = ['modelDirectories', 'sidebarRight']
 
-async function processBridgeRequest() {
+async function processBridgeRequest(ctx) {
   try {
-    const visible = visibleProviders()
-    const url = visible.length
-      ? '/api/dsh-account-models/browser/bridge/next?visible=' + encodeURIComponent(visible.join(','))
-      : '/api/dsh-account-models/browser/bridge/next'
+    const sessionId = getSessionId(ctx)
+    const visible = visibleProviders(ctx, sessionId)
+    const params = new URLSearchParams({visible: visible.join(',')})
+    if (sessionId) params.set('sessionId', sessionId)
+    const url = '/api/dsh-account-models/browser/bridge/next?' + params
     const response = await fetch(url, {cache: 'no-store'})
     if (!response.ok) { bridgeIdleTicks++; return }
     const request = await response.json()
     if (!request.id || !request.provider || !request.expression) { bridgeIdleTicks++; return }
     bridgeIdleTicks = 0
 
-    const frame = await waitForProviderFrame(request.provider, BRIDGE_WAIT_MS)
+    const frame = await waitForProviderFrame(ctx, request.provider, request.sessionId, BRIDGE_WAIT_MS)
     if (!frame) {
       await bridgeResult(request.id, false, undefined, 'BROWSER_NOT_READY: DSH 右侧 Browser 尚未建立当前 Provider 页面')
       return
@@ -94,42 +96,62 @@ async function processBridgeRequest() {
     } catch (error) {
       await bridgeResult(request.id, false, undefined, `GUEST_VIEW_ERROR: ${String(error?.message || error)}`)
     }
-  } catch { bridgeIdleTicks++ }
+  } catch (error) {
+    bridgeIdleTicks++
+    log('warn', 'browser bridge poll failed:', error)
+  }
 }
 
-function scheduleBridge() {
+function scheduleBridge(ctx) {
+  if (bridgeStopped) return
   const delay = bridgeIdleTicks >= BRIDGE_IDLE_BACKOFF ? BRIDGE_POLL_IDLE_MS : BRIDGE_POLL_ACTIVE_MS
   bridgeTimer = setTimeout(async () => {
-    await processBridgeRequest()
-    scheduleBridge()
+    await processBridgeRequest(ctx)
+    if (!bridgeStopped) scheduleBridge(ctx)
   }, delay)
 }
 
-async function waitForProviderFrame(provider, timeoutMs) {
+async function waitForProviderFrame(ctx, provider, sessionId, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const frames = [...document.querySelectorAll('webview')].filter(frame => {
-      try { return typeof frame.getURL === 'function' } catch { return false }
-    })
-    const candidates = frames.filter(frame => {
-      try { return providerHost(provider, frame.getURL?.() || '') } catch { return false }
-    })
-    const visibleFrames = candidates.filter(frame => { try { return frame.offsetParent !== null || frame.clientWidth > 0 } catch { return false } })
-    const frame = (visibleFrames.length ? visibleFrames : candidates).at(-1)
-    if (frame) return frame
+    if (bridgeStopped) return undefined
+    const visibleFrames = visibleProviderFrames(ctx, sessionId, provider)
+    if (visibleFrames.length === 1) return visibleFrames[0]
+    if (visibleFrames.length > 1) {
+      log('error', 'ambiguous provider webviews; refusing to execute bridge request', provider, sessionId)
+      return undefined
+    }
     await new Promise(resolve => setTimeout(resolve, 150))
   }
   return undefined
 }
 
+function visibleProviderFrames(ctx, sessionId, provider) {
+  const activeSessionId = getSessionId(ctx)
+  if (!activeSessionId || (sessionId && sessionId !== activeSessionId)) return []
+  const tabs = browserTabs(ctx, activeSessionId)
+  const activeTab = ctx.sidebarRight.active?.()
+  if (!activeTab || !tabs.some(tab => tab.tabId === activeTab.id)) return []
+  return [...document.querySelectorAll('webview')].filter(frame => {
+    try {
+      return typeof frame.getURL === 'function'
+        && providerHost(provider.id, frame.getURL() || '')
+        && (frame.offsetParent !== null || frame.clientWidth > 0)
+    } catch { return false }
+  })
+}
+
 async function bridgeResult(id, ok, value, error) {
   try {
-    await fetch('/api/dsh-account-models/browser/bridge/result', {
+    const response = await fetch('/api/dsh-account-models/browser/bridge/result', {
       method: 'POST',
       headers: {'content-type': 'application/json'},
       body: JSON.stringify({id, ok, value, error}),
     })
-  } catch {}
+    if (!response.ok) throw new Error('HTTP ' + response.status)
+  } catch (resultError) {
+    log('error', 'failed to report browser bridge result:', id, resultError)
+  }
 }
 
 const PROVIDER_HOSTS = {
@@ -152,9 +174,11 @@ function providerHost(provider, url) {
   } catch { return false }
 }
 
-function visibleProviders() {
-  const urls = currentBrowserUrls()
-  return PROVIDERS.filter(([id]) => urls.some(url => providerHost(id, url))).map(([id]) => id)
+function visibleProviders(ctx, sessionId) {
+  if (!sessionId || getSessionId(ctx) !== sessionId) return []
+  const activeTab = ctx.sidebarRight.active?.()
+  if (!activeTab || !browserTabs(ctx, sessionId).some(tab => tab.tabId === activeTab.id)) return []
+  return PROVIDERS.filter(([id]) => visibleProviderFrames(ctx, sessionId, {id}).length > 0).map(([id]) => id)
 }
 
 function selectedProvider(selection) {
@@ -202,7 +226,7 @@ function currentBrowserUrls() {
 function hasMatchingProviderTab(ctx, sessionId, provider) {
   const tabs = browserTabs(ctx, sessionId)
   const urls = currentBrowserUrls()
-  const urlMatching = urls.some(url => providerHost(provider.id, url))
+  const urlMatching = visibleProviderFrames(ctx, sessionId, provider).length === 1
   const pendingSameProvider = openingProviderBySession.get(sessionId) === provider.id && tabs.length > 0
   const matching = tabs.length > 0 && (urlMatching || pendingSameProvider)
   return {tabs, urls, matching, urlMatching, pendingSameProvider}
@@ -219,13 +243,15 @@ function safeClose(ctx, tabId) {
 
 function closeProviderTabs(ctx, sessionId, provider) {
   openingProviderBySession.delete(sessionId)
-  const frames = browserFrames()
+  const activeTab = ctx.sidebarRight.active?.()
+  const providerFrameVisible = provider && visibleProviderFrames(ctx, sessionId, provider).length === 1
   for (const tab of browserTabs(ctx, sessionId)) {
     const tabUrl = tab.url || tab.params?.url || ''
     if (provider && tabUrl && !providerHost(provider.id, tabUrl)) continue
     if (provider && !tabUrl) {
-      const stillHasProvider = frames.some(f => { try { return providerHost(provider.id, f.getURL?.() || '') } catch { return false } })
-      if (!stillHasProvider) continue
+      // Tab inventory intentionally omits navigation params. Only close an
+      // unidentifiable tab when it is the active tab and its visible page matches.
+      if (tab.tabId !== activeTab?.id || !providerFrameVisible) continue
     }
     safeClose(ctx, tab.tabId)
   }
@@ -236,29 +262,41 @@ async function openProviderBrowser(ctx, provider, sessionId) {
     openingProviderBySession.set(sessionId, provider.id)
     ctx.sidebarRight.openTab('browser', {params: {url: provider.url}})
     log('info', 'browser action: open provider page', provider.id, provider.url)
-    const appeared = await new Promise(resolve => {
-      let settled = false
-      const finish = ok => { if (settled) return; settled = true; clearInterval(poll); resolve(ok) }
-      const poll = setInterval(() => { if (browserTabs(ctx, sessionId).length > 0) finish(true) }, 200)
-      setTimeout(() => finish(browserTabs(ctx, sessionId).length > 0), 3000)
-    })
+    const appeared = await waitForProviderTab(ctx, sessionId, provider, 3000)
     if (appeared) return true
     log('warn', 'browser tab did not appear, retrying open', provider.id)
     ctx.sidebarRight.openTab('browser', {params: {url: provider.url}})
-    const retried = await new Promise(resolve => {
-      let settled = false
-      const finish = ok => { if (settled) return; settled = true; clearInterval(poll); resolve(ok) }
-      const poll = setInterval(() => { if (browserTabs(ctx, sessionId).length > 0) finish(true) }, 200)
-      setTimeout(() => finish(browserTabs(ctx, sessionId).length > 0), 3000)
-    })
-    if (!retried) log('error', 'browser tab still missing after retry', provider.id, provider.url)
-    return true
+    const retried = await waitForProviderTab(ctx, sessionId, provider, 3000)
+    if (!retried) {
+      log('error', 'browser tab still missing after retry', provider.id, provider.url)
+      openingProviderBySession.delete(sessionId)
+    }
+    return retried
   } catch (error) {
+    openingProviderBySession.delete(sessionId)
     log('error', 'browser action failed', provider.id, error)
     return false
   }
 }
 
+function waitForProviderTab(ctx, sessionId, provider, timeoutMs) {
+  return new Promise(resolve => {
+    let settled = false
+    const ready = () => visibleProviderFrames(ctx, sessionId, provider).length === 1
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearInterval(poll)
+      clearTimeout(timeout)
+      resolve(ready())
+    }
+    const poll = setInterval(() => {
+      if (ready()) finish()
+    }, 200)
+    const timeout = setTimeout(finish, timeoutMs)
+    if (ready()) finish()
+  })
+}
 async function reconcileBrowser(ctx, reason = 'observe') {
   const {sessionId, provider} = currentSelection(ctx)
   if (!sessionId || !provider) return {opened: false, matching: false, provider}
@@ -368,13 +406,15 @@ function apply(ctx) {
     triggerReconcile(ctx, 'assistant-stream-start')
   })
 
-  scheduleBridge()
+  bridgeStopped = false
+  scheduleBridge(ctx)
 
   ctx.effect(() => () => {
     unsubscribeSelection()
     unsubscribeMounted()
     unsubscribeAgentStatus()
     unsubscribeAssistantStream()
+    bridgeStopped = true
     clearTimeout(bridgeTimer)
     currentProviderBySession.clear()
     reconcilePromiseBySession.clear()

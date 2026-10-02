@@ -83,8 +83,9 @@ export class AccountManager {
   if(!this.providers.has(id))await this.open(id)
   const p=this.providers.get(id)
   if(!p)throw new Error('Provider 未初始化')
-  const ready=await p.checkReady()
-  await this.store.upsert({...a,status:ready?'ready':'login_required',updatedAt:new Date().toISOString(),lastError:undefined})
+  const health=await p.health()
+  const status=health.status==='ready'?'ready':health.status==='login_required'?'login_required':health.status==='page_changed'?'page_changed':'error'
+  await this.store.upsert({...a,status,updatedAt:new Date().toISOString(),lastError:health.status==='ready'?undefined:health.message})
   return this.snapshot(id)!
  }
 

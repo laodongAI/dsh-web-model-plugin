@@ -33,8 +33,8 @@ export class DefaultBrowserProvider implements BrowserProvider {
   }
  }
 
- private async page(sessionId:string,accountId:string){
-  const page=this.createPage(this.cdp)
+ private async page(sessionId:string,accountId:string,cdp:CdpClient=this.cdp){
+  const page=this.createPage(cdp)
   const health=await this.safeHealth(page)
   if(health.status!=='ready'&&health.status!=='login_required'){
    throw new Error('PAGE_CHANGED: '+(health.message??'网页页面不可用'))
@@ -43,16 +43,16 @@ export class DefaultBrowserProvider implements BrowserProvider {
   const oldBinding=this.conversations.get(sessionId)
   if(oldBinding){
    const convChanged=Boolean(oldBinding.conversationId&&state.conversationId&&oldBinding.conversationId!==state.conversationId)
-   // 双方都拿不到会话 ID 但 URL 变了（如新开对话但路径无 id）：也视为会话变化
    const urlChanged=Boolean(oldBinding.url&&state.url&&oldBinding.url!==state.url)
-   const convMissing=!oldBinding.conversationId&&!state.conversationId
-   if(convChanged||(convMissing&&urlChanged)){
+   const identityLost=Boolean(oldBinding.conversationId&&!state.conversationId)
+   const identityMissing=Boolean(!oldBinding.conversationId&&!state.conversationId)
+   if(convChanged||(urlChanged&&(identityLost||identityMissing))){
     this.conversations.markDesynced(sessionId)
     throw new Error('PAGE_CHANGED: 当前网页已切换到其他会话')
    }
   }
   this.conversations.bind(sessionId,accountId,{id:'dsh-native-browser',url:state.url,title:''},state.conversationId)
-  return {cdp:this.cdp,page}
+  return {cdp,page}
  }
 
  async listModels():Promise<readonly BrowserProviderModel[]>{
@@ -62,27 +62,20 @@ export class DefaultBrowserProvider implements BrowserProvider {
 
  /** 就绪检查（5 秒兜底，防止 bridge 异常时挂死） */
  async checkReady(){
-  let timer:ReturnType<typeof setTimeout>|undefined
-  try{
-   return await Promise.race([
-    this.createPage(this.cdp).canChat(),
-    new Promise<boolean>((_,reject)=>{
-     timer=setTimeout(()=>reject(new Error('SERVICE_UNAVAILABLE: checkReady 超时')),5000)
-    }),
-   ])
-  }catch{return false}
-  finally{if(timer)clearTimeout(timer)}
+  const health=await this.health()
+  return health.status==='ready'
  }
 
- async health():Promise<WebPageHealthResult>{
-  return this.safeHealth(this.createPage(this.cdp))
+ async health(sessionId?:string):Promise<WebPageHealthResult>{
+  return this.safeHealth(this.createPage(sessionId?(this.cdp.withSession?.(sessionId)??this.cdp):this.cdp))
  }
 
  async *chat(req:BrowserChatRequest){
   const sessionId=req.sessionId??req.accountId
+  const cdp=this.cdp.withSession?.(sessionId)??this.cdp
   this.conversations.begin(req.accountId,sessionId)
   try{
-   const result=await this.page(sessionId,req.accountId)
+   const result=await this.page(sessionId,req.accountId,cdp)
    const {page}=result
    const last=req.messages.filter(m=>m.role==='user').at(-1)?.content??''
    if(!last&&!req.attachments?.length)throw new Error('没有可发送的用户消息')
@@ -95,16 +88,28 @@ export class DefaultBrowserProvider implements BrowserProvider {
     const paths=req.attachments.map(x=>x.path).filter(p=>seen.has(p)?false:(seen.add(p),true))
     const pending=this.conversations.unuploaded(sessionId,paths)
     if(pending.length){
-     try{
-      await page.uploadAttachments(pending)
-      this.conversations.markUploaded(sessionId,pending)
-     }catch(error){
-      // 上传失败降级：不阻断消息发送（正文仍可发出），只记录警告
-      console.warn('[dsh-account-models] attachment upload failed, sending text anyway:',error)
-     }
+     try{await page.uploadAttachments(pending)}
+     catch(error){throw new Error('ATTACHMENT_UPLOAD_FAILED: 未能上传本次请求所需附件，消息未发送', {cause:error})}
+     this.conversations.markUploaded(sessionId,pending)
     }
    }
    await page.sendMessage(last)
+   req.onSubmitted?.()
+   for await(const delta of page.streamAnswer(req.signal))yield delta
+  }finally{
+   this.conversations.end(req.accountId,sessionId)
+  }
+ }
+
+ async *resume(req:BrowserChatRequest){
+  const sessionId=req.sessionId??req.accountId
+  const cdp=this.cdp.withSession?.(sessionId)??this.cdp
+  this.conversations.begin(req.accountId,sessionId)
+  try{
+   const {page}=await this.page(sessionId,req.accountId,cdp)
+   const health=await this.safeHealth(page)
+   if(health.status==='login_required')throw new Error('LOGIN_REQUIRED: '+(health.message??'网页账号需要登录'))
+   if(health.status!=='ready')throw new Error('PAGE_CHANGED: '+(health.message??'网页页面不可用'))
    for await(const delta of page.streamAnswer(req.signal))yield delta
   }finally{
    this.conversations.end(req.accountId,sessionId)

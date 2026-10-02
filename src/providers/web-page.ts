@@ -145,8 +145,8 @@ export abstract class WebPageAdapter{
    if(state.changed)throw new Error('PAGE_CHANGED: 网页会话已发生变化')
    const current=(await this.readAnswer(previous)).trimEnd()
    if(current&&current!==previous){
-    // 前缀增长 → 增量；非前缀变化（重渲染/缩短）→ 全量下发由上层截断
-    yield current.startsWith(previous)?current.slice(previous.length):current
+    if(previous&&!current.startsWith(previous))throw new Error('PAGE_CHANGED: 网页回答在生成过程中被替换，已停止以避免重复或错误输出')
+    yield current.slice(previous.length)
     previous=current;idle=0;firstOutputAt??=Date.now()
    }else if(previous)idle++
    if(!firstOutputAt&&Date.now()-started>=this.timing.noStartTimeoutMs)throw new Error('SERVICE_UNAVAILABLE: 网页模型在限定时间内未开始生成回答')

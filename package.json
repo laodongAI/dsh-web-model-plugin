@@ -1,6 +1,6 @@
 {
   "name": "dsh-account-models",
-  "version": "0.2.26",
+  "version": "0.2.27",
   "description": "DSH 0.2.0-rc.2 browser-session accounts for DeepSeek, ChatGPT, Qwen and other Web AI providers",
   "type": "module",
   "main": "lib/index.js",
@@ -46,7 +46,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test"
   },
   "dsh": {
     "bundle": {
